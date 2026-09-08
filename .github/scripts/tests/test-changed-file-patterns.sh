@@ -52,6 +52,24 @@ FIXTURE_PATHS=(
   "DATASETS/shouty/shout.json"           # upper case, defensive
   "datasets.json"                        # root-level file
   "Other/config.json"                    # NEGATIVE: json unrelated to datasets
+  # NEGATIVE: Versioning_Toolkit's versioning test sets. These match the dataset
+  # pattern on the directory name but are JSON Lines of oM objects, not
+  # BH.oM.Data.Library.Dataset documents, so IsValidDataset errors on every one.
+  # Measured 2026-09-07: DatasetComplianceRunner exits 1 on this file and 0 on a
+  # real library dataset. Excluded rather than teaching the runner a second shape.
+  # See BHoM/internal-tickets#36.
+  ".ci/code/Versioning_Test/Datasets/9.2/Objects.json"
+  ".ci/code/Versioning_Test/Datasets/9.1/Methods.json"
+  # The project-directory case. Here the substring comes from neither the filename
+  # nor a data directory: it comes from a project folder named after a *_Datasets
+  # repo, so the pattern selects every .json file in that repository whatever it is
+  # for. These are BHoM versioning upgrade maps, {"Dataset":{"ToNew":..,"ToOld":..}},
+  # read by BHoM_Engine Versioning_Engine/Query/DatasetToNewPaths.cs from
+  # %ProgramData%\BHoM\Upgrades. They carry no _t and cannot be Dataset documents.
+  # The first is FAILING IN PRODUCTION TODAY and the exclusion below deliberately
+  # does NOT cover it. See BHoM/internal-tickets#43.
+  "BuroHappold_Datasets/Versioning_93.json"
+  "BHoM_Datasets/Versioning_93.json"
   # Project-compliance inputs.
   "AssemblyInfo.cs"                      # repo root: the only thing the old token matched
   "Properties/AssemblyInfo.cs"           # the real layout, was missed
@@ -255,6 +273,21 @@ else
     # Must stay narrower than '*.json'.
     assert_not_matches "dataset" "$pat" "Other/config.json"
     assert_not_matches "dataset" "$pat" "Engine/Query/Thing.cs"
+    # Versioning test sets are excluded by directory name, at any dataset version.
+    # They are not Dataset documents and the runner errors on them; the exclusion is
+    # what keeps a Versioning_Toolkit dataset PR from failing on an unrelated cause.
+    assert_not_matches "dataset" "$pat" ".ci/code/Versioning_Test/Datasets/9.2/Objects.json"
+    assert_not_matches "dataset" "$pat" ".ci/code/Versioning_Test/Datasets/9.1/Methods.json"
+    # CHARACTERISATION, NOT APPROVAL. The project-directory case is still selected,
+    # and the first of these is a live production failure. Asserted positively for
+    # two reasons: it proves the exclusion above is one directory layout rather than
+    # a class-wide "stop checking non-datasets", and it means anyone who later widens
+    # the pattern into this case, or re-anchors the selector onto the data directory,
+    # has to flip a visible assertion instead of changing fleet-wide scope silently.
+    # If you are here because you re-anchored the selector: flipping these two to
+    # assert_not_matches is the intended outcome, not a regression.
+    assert_matches     "dataset" "$pat" "BuroHappold_Datasets/Versioning_93.json"
+    assert_matches     "dataset" "$pat" "BHoM_Datasets/Versioning_93.json"
   done <<< "$dataset_patterns"
 fi
 
@@ -287,6 +320,12 @@ else
   assert_not_matches "dataset-tests" "$dt_pattern" "a/mydatasets.json"
   assert_not_matches "dataset-tests" "$dt_pattern" "datasets.json"
   assert_not_matches "dataset-tests" "$dt_pattern" "Other/config.json"
+  # Anchored to .ci/Datasets, so neither the versioning test sets nor the
+  # project-directory case was ever in scope here. Asserted so that re-anchoring
+  # this pattern cannot silently pull them in.
+  assert_not_matches "dataset-tests" "$dt_pattern" ".ci/code/Versioning_Test/Datasets/9.2/Objects.json"
+  assert_not_matches "dataset-tests" "$dt_pattern" "BuroHappold_Datasets/Versioning_93.json"
+  assert_not_matches "dataset-tests" "$dt_pattern" "BHoM_Datasets/Versioning_93.json"
 
   # The two patterns must stay distinct. If someone re-unifies them this fails.
   if [ "$dt_pattern" = "$(printf '%s' "$dataset_patterns" | head -1)" ]; then
