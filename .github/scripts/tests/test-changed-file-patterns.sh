@@ -10,8 +10,12 @@
 #   2. A token with no wildcard is matched as a path prefix from the repo root,
 #      NOT by basename. A bare 'AssemblyInfo.cs' therefore matches only a
 #      repo-root file and misses every Properties/AssemblyInfo.cs.
-#   3. '**' is not special to git. '**/' degrades to '*' plus a mandatory '/',
-#      so it requires at least one leading directory and skips root-level dirs.
+#   3. '**' is not special to git BY DEFAULT. '**/' degrades to '*' plus a
+#      mandatory '/', so it requires at least one leading directory and skips
+#      root-level dirs. Under ':(glob)' it is special and '**/' matches zero or
+#      more leading components, which is the only correct way to write a
+#      basename match. The structural invariant at the foot of this file keys
+#      off that distinction rather than banning '**' outright.
 #
 # Both 2 and 3 shipped as live defects and silently under-selected files, which
 # means the affected checks passed without examining anything. Patterns are read
@@ -66,10 +70,38 @@ FIXTURE_PATHS=(
   # for. These are BHoM versioning upgrade maps, {"Dataset":{"ToNew":..,"ToOld":..}},
   # read by BHoM_Engine Versioning_Engine/Query/DatasetToNewPaths.cs from
   # %ProgramData%\BHoM\Upgrades. They carry no _t and cannot be Dataset documents.
-  # The first is FAILING IN PRODUCTION TODAY and the exclusion below deliberately
-  # does NOT cover it. See BHoM/internal-tickets#43.
+  # The first was the live production failure that motivated the Versioning_<digits>
+  # exclusion. See BHoM/internal-tickets#43.
   "BuroHappold_Datasets/Versioning_93.json"
   "BHoM_Datasets/Versioning_93.json"
+  # The same map one level deeper, for a repo whose projects sit under src/. No
+  # fleet instance today: all 15 measured upgrade maps are at depth 1. Defensive,
+  # and it is what pins the '**' anchor: a single '*/' under :(glob) matches
+  # exactly one leading component and would pass every other assertion here.
+  "src/BuroHappold_Datasets/Versioning_93.json"
+  # POSITIVE, must stay selected. A real dataset inside a DIRECTORY named like an
+  # upgrade map. This is what :(glob) buys: without it the token's trailing '*'
+  # crosses '/', so this whole directory would leave scope. Measured 2026-09-09.
+  # Note there is deliberately no depth-zero fixture: a bare
+  # Versioning_<digits>.json at the repo root carries no 'datasets' substring, so
+  # the base selector never reaches it and any assertion on it would pass
+  # vacuously.
+  "Datasets/Versioning_93/RealDataset.json"
+  # NEGATIVE for the base selector, not for the exclusion. This is the layout a
+  # colleague cited as evidence the collision was fleet-wide: an upgrade map at a
+  # project root in a repo with no 'datasets' anywhere in the path. Measured
+  # 2026-09-09 over 309 repos: 15 such files in 11 repos, and NONE of them is
+  # selected, because the base selector needs the substring. Asserted so the
+  # example is recorded as inert rather than refiled as a bug.
+  "Physical_oM/Versioning_93.json"
+  # POSITIVE, must stay selected. The [0-9] gate is what keeps these in scope; a
+  # bare Versioning_* filename match would drop both.
+  #   - a genuine dataset whose name happens to start with the same prefix
+  #   - BHoM_Engine's dataset-test layout is .ci/Datasets/<Project>_Engine/<Verb>/,
+  #     and Versioning_Engine is a real project there (18 source files, no dataset
+  #     folder yet), so this path is one commit away from existing.
+  "Datasets/Versioning_Rules.json"
+  ".ci/Datasets/Versioning_Engine/Query/Thing.json"
   # Project-compliance inputs.
   "AssemblyInfo.cs"                      # repo root: the only thing the old token matched
   "Properties/AssemblyInfo.cs"           # the real layout, was missed
@@ -278,16 +310,30 @@ else
     # what keeps a Versioning_Toolkit dataset PR from failing on an unrelated cause.
     assert_not_matches "dataset" "$pat" ".ci/code/Versioning_Test/Datasets/9.2/Objects.json"
     assert_not_matches "dataset" "$pat" ".ci/code/Versioning_Test/Datasets/9.1/Methods.json"
-    # CHARACTERISATION, NOT APPROVAL. The project-directory case is still selected,
-    # and the first of these is a live production failure. Asserted positively for
-    # two reasons: it proves the exclusion above is one directory layout rather than
-    # a class-wide "stop checking non-datasets", and it means anyone who later widens
-    # the pattern into this case, or re-anchors the selector onto the data directory,
-    # has to flip a visible assertion instead of changing fleet-wide scope silently.
-    # If you are here because you re-anchored the selector: flipping these two to
-    # assert_not_matches is the intended outcome, not a regression.
-    assert_matches     "dataset" "$pat" "BuroHappold_Datasets/Versioning_93.json"
-    assert_matches     "dataset" "$pat" "BHoM_Datasets/Versioning_93.json"
+    # Versioning upgrade maps are excluded by filename, in any repo, at any depth.
+    # These two were assert_matches until 2026-09-09, as characterisation of a live
+    # production failure the earlier exclusion deliberately did not cover; the
+    # Versioning_<digits> token covers it now, so they are flipped.
+    assert_not_matches "dataset" "$pat" "BuroHappold_Datasets/Versioning_93.json"
+    assert_not_matches "dataset" "$pat" "BHoM_Datasets/Versioning_93.json"
+    # Depth-agnostic: '**/' under :(glob) matches zero or more leading components.
+    # A single '*/' would match only depth 1 and pass every assertion above.
+    assert_not_matches "dataset" "$pat" "src/BuroHappold_Datasets/Versioning_93.json"
+    # The exclusion is a FILENAME match, and these three are what keeps it one.
+    # The first two are lost to ':(exclude,icase)*Versioning_*.json', which reads
+    # as a filename rule but is not one: without :(glob) the leading '*' crosses
+    # '/', so it drops every .json under any directory containing 'Versioning_'.
+    # The third is lost to the same token without :(glob) even with the [0-9] gate,
+    # because the TRAILING '*' crosses '/' and takes the directory's contents with
+    # it. All three measured 2026-09-09.
+    assert_matches     "dataset" "$pat" "Datasets/Versioning_Rules.json"
+    assert_matches     "dataset" "$pat" ".ci/Datasets/Versioning_Engine/Query/Thing.json"
+    assert_matches     "dataset" "$pat" "Datasets/Versioning_93/RealDataset.json"
+    # Never selected in the first place: no 'datasets' substring anywhere in the
+    # path. Holds before and after the exclusion, and is asserted for exactly that
+    # reason. Do not read it as evidence the exclusion works; the three
+    # assert_not_matches above are that evidence.
+    assert_not_matches "dataset" "$pat" "Physical_oM/Versioning_93.json"
   done <<< "$dataset_patterns"
 fi
 
@@ -326,6 +372,13 @@ else
   assert_not_matches "dataset-tests" "$dt_pattern" ".ci/code/Versioning_Test/Datasets/9.2/Objects.json"
   assert_not_matches "dataset-tests" "$dt_pattern" "BuroHappold_Datasets/Versioning_93.json"
   assert_not_matches "dataset-tests" "$dt_pattern" "BHoM_Datasets/Versioning_93.json"
+  assert_not_matches "dataset-tests" "$dt_pattern" "Physical_oM/Versioning_93.json"
+  assert_not_matches "dataset-tests" "$dt_pattern" "Datasets/Versioning_93/RealDataset.json"
+  # This one IS a fixture: it sits under the canonical directory and is a real
+  # Dataset document. It must stay in scope here while the compliance pattern also
+  # keeps it, so the two patterns cannot end up disagreeing about a real dataset
+  # merely because its project is called Versioning_Engine.
+  assert_matches     "dataset-tests" "$dt_pattern" ".ci/Datasets/Versioning_Engine/Query/Thing.json"
 
   # The two patterns must stay distinct. If someone re-unifies them this fails.
   if [ "$dt_pattern" = "$(printf '%s' "$dataset_patterns" | head -1)" ]; then
@@ -408,14 +461,28 @@ done
 # A wildcard-free token silently means "repo root only"; '**/' silently means
 # "at least one leading directory". Neither is ever intended for a basename
 # match. altConfigs.txt is the sole legitimate root-anchored file.
+#
+# The '**' rule is conditional on the token's magic, which is the one exception.
+# Defect 3 is a property of git's DEFAULT matcher (wildmatch without
+# WM_PATHNAME), where '**' is not special and '**/' degrades to '*' plus a
+# mandatory '/'. ':(glob)' switches on WM_PATHNAME, and there '**/' is special
+# and matches ZERO or more leading components. Measured 2026-09-09 on a fixture
+# holding Versioning_93.json, Datasets/Versioning_93.json and
+# a/b/c/Datasets/Versioning_93.json:
+#   ':(glob,icase)**/Versioning_[0-9]*.json'  selects all three
+#   ':(icase)**/Versioning_[0-9]*.json'       selects two, missing the root file
+# So '**' under :(glob) is the only correct way to write a basename match here,
+# and forbidding it outright would forbid the fix as well as the defect.
 echo "structural invariant over every shipped pattern token"
 ROOT_ANCHORED_OK="altConfigs.txt"
 while IFS= read -r pat; do
   [ -z "$pat" ] && continue
   for tok in $pat; do
     case "$tok" in
+      :\(*glob*\)*'**'*)
+        pass "invariant: '$tok' uses '**' under :(glob), where it matches zero or more leading components" ;;
       *'**'*)
-        fail "invariant: '$tok' uses '**', which git reads as '*' plus a mandatory '/' (skips root-level dirs)" ;;
+        fail "invariant: '$tok' uses '**' without :(glob), which git reads as '*' plus a mandatory '/' (skips root-level dirs)" ;;
       *'*'*|*'?'*|*'['*|:\(*\)*)
         pass "invariant: '$tok' is wildcarded or uses pathspec magic" ;;
       "$ROOT_ANCHORED_OK")

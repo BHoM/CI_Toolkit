@@ -54,18 +54,12 @@ jobs:
         uses: BHoM/CI_Toolkit/.github/actions/ci-compliance@develop
         with:
           check_type: dataset
-          # Versioning_Test/Datasets holds JSON Lines of oM objects, not
-          # BH.oM.Data.Library.Dataset documents, so IsValidDataset errors on every
-          # one of them. Measured: DatasetComplianceRunner exits 1 on 9.2/Objects.json
-          # and 0 on a real library dataset. Excluded rather than teaching the runner
-          # a second shape, because that would touch Test_Toolkit. See
-          # BHoM/internal-tickets#36.
-          #
-          # This excludes one directory layout, not a class of file. The selector is
-          # substring-based, not dataset-aware: '*' crosses '/' without :(glob), so
-          # the substring can come from a filename, a data directory, or a project
-          # directory named *_Datasets. See BHoM/internal-tickets#43.
-          patterns: ':(icase)*datasets*.json :(exclude,icase)*Versioning_Test/Datasets/*'
+          # Excludes two shapes that match this selector but are not
+          # BH.oM.Data.Library.Dataset documents: Versioning_Test/Datasets, which is
+          # JSON Lines of oM objects, and Versioning_<digits>.json upgrade maps.
+          # Keep both controls on the last token: :(glob) stops its wildcards
+          # crossing '/', and [0-9] keeps a real Versioning_Rules.json in scope.
+          patterns: ':(icase)*datasets*.json :(exclude,icase)*Versioning_Test/Datasets/* :(exclude,glob,icase)**/Versioning_[0-9]*.json'
           app_id: ${{ secrets.BHOM_APP_ID }}
           private_key: ${{ secrets.BHOM_APP_PRIVATE_KEY }}
 
