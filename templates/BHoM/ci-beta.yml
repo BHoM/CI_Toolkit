@@ -70,18 +70,40 @@ jobs:
         uses: BHoM/CI_Toolkit/.github/actions/ci-compliance@develop
         with:
           check_type: dataset
-          # Versioning_Test/Datasets holds JSON Lines of oM objects, not
-          # BH.oM.Data.Library.Dataset documents, so IsValidDataset errors on every
-          # one of them. Measured: DatasetComplianceRunner exits 1 on 9.2/Objects.json
-          # and 0 on a real library dataset. Excluded rather than teaching the runner
-          # a second shape, because that would touch Test_Toolkit. See
-          # BHoM/internal-tickets#36.
+          # Two shapes match this selector without being
+          # BH.oM.Data.Library.Dataset documents, so IsValidDataset errors on both.
+          # Excluded rather than teaching the runner a second shape, because that
+          # would touch Test_Toolkit. See BHoM/internal-tickets#36.
           #
-          # This excludes one directory layout, not a class of file. The selector is
-          # substring-based, not dataset-aware: '*' crosses '/' without :(glob), so
-          # the substring can come from a filename, a data directory, or a project
-          # directory named *_Datasets. See BHoM/internal-tickets#43.
-          patterns: ':(icase)*datasets*.json :(exclude,icase)*Versioning_Test/Datasets/*'
+          # Versioning_Test/Datasets is JSON Lines of oM objects. Measured:
+          # DatasetComplianceRunner exits 1 on 9.2/Objects.json and 0 on a real
+          # library dataset. Its filenames are Objects/Methods/Adapters.json and
+          # carry no signal, so only a path exclusion reaches it.
+          #
+          # Versioning_<digits>.json are BHoM versioning upgrade maps,
+          # {"Dataset":{"ToNew":..,"ToOld":..}}, read by BHoM_Engine
+          # Versioning_Engine/Query/DatasetToNewPaths.cs. They carry no _t and can
+          # never be Dataset documents. One sits at a project root in 11 repos
+          # (15 files, measured 2026-09-09) and is selected whenever a path
+          # component contains 'datasets', which is the *_Datasets repos.
+          #
+          # The two exclusions stay separate tokens, and both the [0-9] gate and
+          # :(glob) are load-bearing:
+          #   - a bare ':(exclude,icase)*Versioning_*.json' reads as a filename rule
+          #     but is not one. Without :(glob) '*' crosses '/', so it drops every
+          #     .json under any directory containing 'Versioning_', which includes
+          #     the Versioning_Test sets above and any real dataset under a
+          #     Versioning_Engine folder.
+          #   - without :(glob) the trailing '*' also crosses '/', so a DIRECTORY
+          #     named Versioning_<digits> would take its whole contents out of scope.
+          #   - without [0-9] the token would drop a genuine dataset named
+          #     Versioning_Rules.json. Gating on the current BHoM version instead
+          #     would not work either: repos keep the map for whatever version they
+          #     last needed one at, and six of the 15 are Versioning_33.json.
+          # Depth zero needs no case: the base selector requires 'datasets' in the
+          # path, which a bare Versioning_<digits>.json filename cannot supply.
+          # See BHoM/internal-tickets#43.
+          patterns: ':(icase)*datasets*.json :(exclude,icase)*Versioning_Test/Datasets/* :(exclude,glob,icase)**/Versioning_[0-9]*.json'
           app_id: ${{ secrets.BHOM_APP_ID }}
           private_key: ${{ secrets.BHOM_APP_PRIVATE_KEY }}
 
