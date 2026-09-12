@@ -134,6 +134,7 @@ public static class RunCommand
         Func<string, string, string?, (string? Cause, ClassificationPath Path, IReadOnlyList<string> Candidates)> probeSignature =
             (typeFullName, methodName, declaringAssembly) =>
                 ProbeDeclaringType(loaded, typeFullName, methodName, declaringAssembly);
+        Func<string, IReadOnlyList<string>> probeTypeCandidates = t => ProbeTypeCandidates(loaded, t);
         foreach (var method in methods)
         {
             object? rawResult;
@@ -160,7 +161,7 @@ public static class RunCommand
                 return 1;
             }
 
-            var partial = ExtractFilteredResult(rawResult, isAttributable, unresolvableSkips, probeSignature, diagnostics, closure, typeIndex);
+            var partial = ExtractFilteredResult(rawResult, isAttributable, unresolvableSkips, probeSignature, diagnostics, closure, typeIndex, probeTypeCandidates);
             allFailures.AddRange(partial.Failures);
         }
 
@@ -490,7 +491,8 @@ public static class RunCommand
         var nsPrefixes = BuildNamespacePrefixes(loaded);
         return ExtractFilteredResult(
             rawResult, (d, _) => (IsFromLoadedNamespace(d, nsPrefixes), AttributionBasis.NotRecorded),
-            typeIndex: BuildLoadedTypeIndex(loaded));
+            typeIndex: BuildLoadedTypeIndex(loaded),
+            probeTypeCandidates: t => ProbeTypeCandidates(loaded, t));
     }
 
     public static VersioningResult ExtractFilteredResult(
@@ -502,7 +504,10 @@ public static class RunCommand
         ClosureContext? closure = null,
         // Defaults to Empty so a caller that is not exercising resolution keeps the
         // pre-existing behaviour rather than having findings reclassified underneath it.
-        LoadedTypeIndex? typeIndex = null)
+        LoadedTypeIndex? typeIndex = null,
+        // Null means object-record ambiguity is not scanned, which is the pre-existing
+        // behaviour and what every caller that does not supply a closure should get.
+        Func<string, IReadOnlyList<string>>? probeTypeCandidates = null)
     {
         if (rawResult is null)
             return new VersioningResult
@@ -513,7 +518,7 @@ public static class RunCommand
             };
 
         var failures = new List<FailureInfo>();
-        CollectLeafFailures(rawResult, isAttributable, failures, unresolvableSkips, probeSignature, diagnostics, closure, typeIndex ?? LoadedTypeIndex.Empty, depth: 0);
+        CollectLeafFailures(rawResult, isAttributable, failures, unresolvableSkips, probeSignature, diagnostics, closure, typeIndex ?? LoadedTypeIndex.Empty, probeTypeCandidates, depth: 0);
 
         var status = failures.Count > 0 ? VersioningStatus.Error : VersioningStatus.Pass;
         return new VersioningResult
@@ -531,7 +536,7 @@ public static class RunCommand
         List<UnverifiedFailure>? unresolvableSkips,
         Func<string, string, string?, (string? Cause, ClassificationPath Path, IReadOnlyList<string> Candidates)>? probeSignature,
         List<FailureDiagnostic>? diagnostics, ClosureContext? closure,
-        LoadedTypeIndex typeIndex, int depth)
+        LoadedTypeIndex typeIndex, Func<string, IReadOnlyList<string>>? probeTypeCandidates, int depth)
     {
         // BHoM's TestResult tree has at most 3 levels under the root (outer → per-version
         // summary → individual type result). Depth 5 gives headroom for unexpected nesting
@@ -583,6 +588,21 @@ public static class RunCommand
                 .Select(ParseMethodEventAssembly)
                 .FirstOrDefault(a => a is not null);
 
+            // Object records carry no Method event, so the assembly comes from the dataset's
+            // `_asm` field instead, surfaced as its own event. Consulted only when the Method
+            // event yielded nothing, so the method path is untouched: a record cannot be both.
+            // Null throughout until Versioning_Toolkit emits the event, which is what makes
+            // this change inert on its own.
+            string? objectTypeName = null;
+            if (declaringAssembly is null)
+            {
+                var objectEvent = eventMessages
+                    .Select(ParseObjectEventAssembly)
+                    .FirstOrDefault(p => p.Assembly is not null);
+                objectTypeName = objectEvent.TypeName;
+                declaringAssembly = objectEvent.Assembly;
+            }
+
             var (attributable, attributedBy) = isAttributable(desc, declaringAssembly);
             if (!attributable)
                 return;
@@ -609,7 +629,19 @@ public static class RunCommand
             if (cause is null)
             {
                 if (eventType is null || eventMethod is null)
+                {
                     path = ClassificationPath.NoMethodEvent;
+
+                    // An object record has no method, so the signature probe cannot run and the
+                    // path stays NoMethodEvent. The ambiguity question is still live and is
+                    // answerable from the type alone: if more than one loaded assembly declares
+                    // it, `_asm` resolved to one of several and the run should say so rather
+                    // than normalise it away silently. Without this the metric below can never
+                    // count an object record, because candidates only ever came from the
+                    // method probe.
+                    if (probeTypeCandidates is not null && objectTypeName is not null)
+                        candidates = probeTypeCandidates(objectTypeName);
+                }
                 else if (probeSignature is not null)
                     (cause, path, candidates) = probeSignature(eventType, eventMethod, declaringAssembly);
                 else
@@ -697,7 +729,7 @@ public static class RunCommand
             {
                 string childStatus = child.GetType().GetProperty("Status")?.GetValue(child)?.ToString() ?? "Pass";
                 if (childStatus is "Error" or "Warning")
-                    CollectLeafFailures(child, isAttributable, failures, unresolvableSkips, probeSignature, diagnostics, closure, typeIndex, depth + 1);
+                    CollectLeafFailures(child, isAttributable, failures, unresolvableSkips, probeSignature, diagnostics, closure, typeIndex, probeTypeCandidates, depth + 1);
             }
         }
     }
@@ -987,6 +1019,66 @@ public static class RunCommand
 
         string assembly = match.Groups["assembly"].Value.Trim();
         return assembly.Length > 0 ? assembly : null;
+    }
+
+    // Object records have no Method event, so until now they had no declaring assembly at all
+    // and always fell to the namespace guess. The dataset's `_asm` field closes that, and this
+    // is the wire format it arrives in:
+    //
+    //     Object <FullTypeName> declared in "<TypeName>, <AssemblyName>"
+    //
+    // THIS IS A CONTRACT. Versioning_Toolkit's FromJson.cs must emit exactly this shape for the
+    // field to be read; nothing else in the runner can see the dataset. It deliberately mirrors
+    // the Method event's assembly-qualified "Name" so the two parsers stay symmetric and a
+    // reader of one can predict the other.
+    //
+    // The closing quote is required, unlike the Method pattern, because this format is ours to
+    // define: a malformed emission should fail to parse and fall back to the namespace rather
+    // than capture a truncated assembly name and attribute confidently to the wrong repository.
+    private static readonly Regex _objectEventAssemblyPattern = new(
+        @"^Object\s+\S+\s+declared\s+in\s+""(?<type>[^"",]+),\s*(?<assembly>[^"",]+)""",
+        RegexOptions.Compiled);
+
+    // The declaring type is returned alongside the assembly because the ambiguity scan needs a
+    // type name and the leaf's Description is not reliably one: DescriptionFromJson mangles
+    // some entries. The event states it directly.
+    public static (string? TypeName, string? Assembly) ParseObjectEventAssembly(string message)
+    {
+        if (string.IsNullOrEmpty(message))
+            return (null, null);
+
+        var match = _objectEventAssemblyPattern.Match(message);
+        if (!match.Success)
+            return (null, null);
+
+        string type = match.Groups["type"].Value.Trim();
+        string assembly = match.Groups["assembly"].Value.Trim();
+        return (type.Length > 0 ? type : null, assembly.Length > 0 ? assembly : null);
+    }
+
+    // Every loaded assembly that yields the named type. The type-only half of
+    // ProbeDeclaringType's candidate collection, for records that have no method to probe.
+    //
+    // Not shared with ProbeDeclaringType, deliberately. That loop interleaves the signature
+    // probe with the candidate walk and takes its verdict from the first assembly that
+    // answers; splitting it would give the method path a second pass over the closure and
+    // change code this PR has no reason to touch.
+    internal static IReadOnlyList<string> ProbeTypeCandidates(List<Assembly> loaded, string typeFullName)
+    {
+        var candidates = new List<string>();
+        foreach (var asm in loaded)
+        {
+            Type? type;
+            try { type = asm.GetType(typeFullName, throwOnError: false); }
+            catch { continue; }
+
+            if (type is null)
+                continue;
+
+            try { candidates.Add(asm.GetName().Name ?? "(unnamed)"); }
+            catch { candidates.Add("(unnamed)"); }
+        }
+        return candidates;
     }
 
     // A failure attributed to the subject that could not actually be verified, and the
