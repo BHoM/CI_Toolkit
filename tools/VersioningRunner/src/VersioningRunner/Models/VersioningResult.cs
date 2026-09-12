@@ -101,6 +101,12 @@ public enum AttributionBasis
     // over-attributes a repository that owns a namespace others extend, and is counted in
     // the run output for exactly that reason: its size must be measured, not assumed.
     NamespaceFallback,
+    // Attribution could not be evaluated at all, because the finding's description is not a
+    // type name. This is NOT "not ours": it is "the question could not be asked". Kept
+    // distinct from NamespaceFallback because the two say different things about how much a
+    // reader should trust the row, and distinct from a drop because a finding nobody can
+    // attribute is still a finding.
+    NotApplicable,
 }
 
 // What this run actually built, needed to tell "the recorded declaring

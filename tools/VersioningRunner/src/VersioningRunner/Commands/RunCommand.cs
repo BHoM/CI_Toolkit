@@ -100,7 +100,7 @@ public static class RunCommand
         if (subjectNamespaces is null)
         {
             Console.WriteLine($"Attribution: whole closure, {nsPrefixes.Count} namespace prefix(es)");
-            isAttributable = (d, _) => (IsFromLoadedNamespace(d, nsPrefixes), AttributionBasis.NotRecorded);
+            isAttributable = (d, _) => AttributeWholeClosure(d, nsPrefixes);
         }
         else
         {
@@ -489,7 +489,7 @@ public static class RunCommand
     {
         var nsPrefixes = BuildNamespacePrefixes(loaded);
         return ExtractFilteredResult(
-            rawResult, (d, _) => (IsFromLoadedNamespace(d, nsPrefixes), AttributionBasis.NotRecorded),
+            rawResult, (d, _) => AttributeWholeClosure(d, nsPrefixes),
             typeIndex: BuildLoadedTypeIndex(loaded));
     }
 
@@ -672,6 +672,25 @@ public static class RunCommand
             // lose a real regression that happens to sit on this path. DeriveStatus then
             // yields Warning and ExitCodeFor yields 0: still in the log, still in the
             // artefact, no longer a gate. See BHoM/internal-tickets#31.
+            // A finding attribution could not evaluate must never gate, and this is the line that
+            // guarantees it rather than leaving it to circumstance.
+            //
+            // Written as an unconditional assignment on this basis, before the namespace-fallback
+            // rule below, because the alternative is to rely on something else supplying a cause.
+            // Nothing else does: a dataset leaf carries no type-naming event, so
+            // ClassifyUnresolvableCause finds nothing; it has no Method event, so the signature
+            // probe never runs; and it names no declaring assembly, so the closure
+            // reclassification is skipped. The leaf's own Status cannot help either, because
+            // CollectLeafFailures reads Status only as an entry filter and never again, so a
+            // producer downgrading Error to Warning is invisible here. Without this line every
+            // dataset finding would arrive with a null cause and be counted as a real failure,
+            // on every repository, the moment this change lands.
+            if (attributedBy == AttributionBasis.NotApplicable)
+                cause = "attribution does not apply to this finding: its description is a path "
+                    + "rather than a type name, so neither the declaring assembly nor the "
+                    + "namespace can say whose it is. Reported so it is visible, and not counted "
+                    + "against this repository. See BHoM/internal-tickets#36";
+
             if (cause is null && attributedBy == AttributionBasis.NamespaceFallback)
                 cause = "ownership inferred from a namespace prefix, because the dataset "
                     + "record named no declaring assembly, so this finding may belong to "
@@ -886,6 +905,12 @@ public static class RunCommand
         if (declaringAssembly is not null)
             return (IsFromSubjectAssembly(declaringAssembly, closure), AttributionBasis.DeclaringAssembly);
 
+        // Neither mode can evaluate a description that is not a type name, and returning false
+        // there conflates "not ours" with "unanswerable" and drops the finding entirely. Kept
+        // instead, with the basis saying why. The caller makes it non-gating.
+        if (!IsAttributionApplicable(description))
+            return (true, AttributionBasis.NotApplicable);
+
         // No assembly recorded, so the ambiguous string is all there is. Kept rather than
         // dropped: a silent drop would lose a real regression. Counted by the caller so the
         // size of this path is measured rather than assumed.
@@ -925,6 +950,39 @@ public static class RunCommand
     // method. Descriptions arrive either as a type full name or as "DeclaringType.MethodName"
     // (Versioning_Toolkit's DescriptionFromJson), and both are strict prefix extensions of
     // the declaring namespace, which is why this is a prefix test and why it is a fallback.
+    // Whether attribution is even a question that can be asked about this finding.
+    //
+    // Rests on a hard property of the CLR rather than on a guess about shape: a type's full name
+    // cannot contain a directory separator. So a description carrying one is definitionally not a
+    // type name, and both attribution modes are inapplicable rather than negative. The two
+    // producers that hit this are Versioning_Toolkit's dataset leg, whose Description is a library
+    // path such as "Planning\Labels\IssueLabels", and its absent-file result, whose Description is
+    // a filesystem path.
+    //
+    // Deliberately NOT a test for "looks like a namespace". That would be the shape-guessing this
+    // exists to avoid, and it would put a second, weaker rule beside the namespace matching that
+    // is already the weakest part of attribution. A separator is a fact; resemblance is not.
+    //
+    // An empty description is also unanswerable. DescriptionFromJson returns "" for a record with
+    // fewer than four quote-delimited segments, so an unparseable record lands here rather than
+    // being dropped. Not currently reachable: the 9.2 capture has zero unparseable records.
+    internal static bool IsAttributionApplicable(string description)
+        => !string.IsNullOrWhiteSpace(description)
+        && description.IndexOf('\\') < 0
+        && description.IndexOf('/') < 0;
+
+    // Whole-closure attribution, in one place rather than two.
+    //
+    // There are two call sites, Execute's no-subject-list branch and the assembly-list overload of
+    // ExtractFilteredResult, and they must not drift: the second is what the full-history workflow
+    // reaches, and that workflow runs --test-all across all 24 staged versions, which is where the
+    // dataset findings actually live. Duplicating the predicate left that site silently uncovered.
+    internal static (bool Attributable, AttributionBasis Basis) AttributeWholeClosure(
+        string description, HashSet<string> nsPrefixes)
+        => IsAttributionApplicable(description)
+            ? (IsFromLoadedNamespace(description, nsPrefixes), AttributionBasis.NotRecorded)
+            : (true, AttributionBasis.NotApplicable);
+
     public static bool IsFromSubjectNamespace(string description, HashSet<string> subjectNamespaces)
     {
         if (string.IsNullOrWhiteSpace(description) || subjectNamespaces.Count == 0)
