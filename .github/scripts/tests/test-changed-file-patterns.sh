@@ -61,7 +61,6 @@ FIXTURE_PATHS=(
   # BH.oM.Data.Library.Dataset documents, so IsValidDataset errors on every one.
   # Measured 2026-09-07: DatasetComplianceRunner exits 1 on this file and 0 on a
   # real library dataset. Excluded rather than teaching the runner a second shape.
-  # See BHoM/internal-tickets#36.
   ".ci/code/Versioning_Test/Datasets/9.2/Objects.json"
   ".ci/code/Versioning_Test/Datasets/9.1/Methods.json"
   # The project-directory case. Here the substring comes from neither the filename
