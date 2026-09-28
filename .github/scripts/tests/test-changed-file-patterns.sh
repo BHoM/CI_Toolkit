@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# test-changed-file-patterns.sh — asserts the changed-file patterns this repo
+# test-changed-file-patterns.sh: asserts the changed-file patterns this repo
 # ships behave correctly when handed to `git diff -- <pathspec>`.
 #
 # compute-changed-files does `read -ra pathspecs <<< "$PATTERNS"` and passes the
@@ -51,7 +51,7 @@ FIXTURE_PATHS=(
   "src/datasets/lower/low.json"          # lowercase, already matched
   "a/mydatasets.json"                    # substring in filename, already matched
   "Datasets/root-direct.json"            # root-level, e.g. CFD_Toolkit
-  "Datasets/Area/root-nested.json"       # root-level nested, e.g. BuroHappold_Datasets
+  "Datasets/Area/root-nested.json"       # root-level nested, e.g. a *_Datasets repo
   "DataSets/Caps/caps.json"              # root + capital S, e.g. LifeCycleAssessment_Toolkit
   "DATASETS/shouty/shout.json"           # upper case, defensive
   "datasets.json"                        # root-level file
@@ -70,15 +70,15 @@ FIXTURE_PATHS=(
   # for. These are BHoM versioning upgrade maps, {"Dataset":{"ToNew":..,"ToOld":..}},
   # read by BHoM_Engine Versioning_Engine/Query/DatasetToNewPaths.cs from
   # %ProgramData%\BHoM\Upgrades. They carry no _t and cannot be Dataset documents.
-  # The first was the live production failure that motivated the Versioning_<digits>
-  # exclusion. See BHoM/internal-tickets#43.
-  "BuroHappold_Datasets/Versioning_93.json"
+  # Both sit in a project folder named *_Datasets, which is what supplies the
+  # 'datasets' substring the base selector needs.
+  "Example_Datasets/Versioning_93.json"
   "BHoM_Datasets/Versioning_93.json"
   # The same map one level deeper, for a repo whose projects sit under src/. No
   # fleet instance today: all 15 measured upgrade maps are at depth 1. Defensive,
   # and it is what pins the '**' anchor: a single '*/' under :(glob) matches
   # exactly one leading component and would pass every other assertion here.
-  "src/BuroHappold_Datasets/Versioning_93.json"
+  "src/Example_Datasets/Versioning_93.json"
   # POSITIVE, must stay selected. A real dataset inside a DIRECTORY named like an
   # upgrade map. This is what :(glob) buys: without it the token's trailing '*'
   # crosses '/', so this whole directory would leave scope. Measured 2026-09-09.
@@ -311,14 +311,14 @@ else
     assert_not_matches "dataset" "$pat" ".ci/code/Versioning_Test/Datasets/9.2/Objects.json"
     assert_not_matches "dataset" "$pat" ".ci/code/Versioning_Test/Datasets/9.1/Methods.json"
     # Versioning upgrade maps are excluded by filename, in any repo, at any depth.
-    # These two were assert_matches until 2026-09-09, as characterisation of a live
-    # production failure the earlier exclusion deliberately did not cover; the
-    # Versioning_<digits> token covers it now, so they are flipped.
-    assert_not_matches "dataset" "$pat" "BuroHappold_Datasets/Versioning_93.json"
+    # These two were assert_matches until 2026-09-09, characterising a case the
+    # earlier exclusion deliberately did not cover; the Versioning_<digits> token
+    # covers it now, so they are flipped.
+    assert_not_matches "dataset" "$pat" "Example_Datasets/Versioning_93.json"
     assert_not_matches "dataset" "$pat" "BHoM_Datasets/Versioning_93.json"
     # Depth-agnostic: '**/' under :(glob) matches zero or more leading components.
     # A single '*/' would match only depth 1 and pass every assertion above.
-    assert_not_matches "dataset" "$pat" "src/BuroHappold_Datasets/Versioning_93.json"
+    assert_not_matches "dataset" "$pat" "src/Example_Datasets/Versioning_93.json"
     # The exclusion is a FILENAME match, and these three are what keeps it one.
     # The first two are lost to ':(exclude,icase)*Versioning_*.json', which reads
     # as a filename rule but is not one: without :(glob) the leading '*' crosses
@@ -370,7 +370,7 @@ else
   # project-directory case was ever in scope here. Asserted so that re-anchoring
   # this pattern cannot silently pull them in.
   assert_not_matches "dataset-tests" "$dt_pattern" ".ci/code/Versioning_Test/Datasets/9.2/Objects.json"
-  assert_not_matches "dataset-tests" "$dt_pattern" "BuroHappold_Datasets/Versioning_93.json"
+  assert_not_matches "dataset-tests" "$dt_pattern" "Example_Datasets/Versioning_93.json"
   assert_not_matches "dataset-tests" "$dt_pattern" "BHoM_Datasets/Versioning_93.json"
   assert_not_matches "dataset-tests" "$dt_pattern" "Physical_oM/Versioning_93.json"
   assert_not_matches "dataset-tests" "$dt_pattern" "Datasets/Versioning_93/RealDataset.json"
