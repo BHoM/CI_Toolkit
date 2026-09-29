@@ -6,7 +6,7 @@ namespace VersioningRunner.Tests
     // Load order is not cosmetic. ProbeDeclaringType takes its verdict from the first
     // loaded assembly that yields the declaring type, and 42 type names in the fleet are
     // defined by more than one assembly, so the enumeration order decides the
-    // classification for those. See CI_Toolkit#161.
+    // classification for those.
     public class AssemblyLoadOrderTests
     {
         private static string[] Names(IEnumerable<string> paths)
