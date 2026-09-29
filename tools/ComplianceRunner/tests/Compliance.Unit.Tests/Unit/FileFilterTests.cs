@@ -40,7 +40,48 @@ public class FileFilterTests
         [TestCase("datasets/foo.json",        ExpectedResult = true)]  // root-level
         [TestCase("DataSets/foo.json",        ExpectedResult = true)]  // root-level, mixed case
         [TestCase("DataSets/LCA/deep/x.json", ExpectedResult = true)]  // root-level, nested
+
+        // Versioning upgrade maps. The live case is a project directory supplying the
+        // "datasets" substring, which is how BuroHappold_Datasets/Versioning_93.json and
+        // BHoM_Datasets/Versioning_100.json get selected at all.
+        [TestCase("BHoM_Datasets/Versioning_93.json",        ExpectedResult = false)]
+        [TestCase("BHoM_Datasets/Versioning_100.json",       ExpectedResult = false)]
+        [TestCase(@"BHoM_Datasets\Versioning_93.json",       ExpectedResult = false)] // backslash separators
+        [TestCase("Datasets/Versioning_9.json",              ExpectedResult = false)] // single digit
+        [TestCase("a/Datasets/deep/Versioning_93.json",      ExpectedResult = false)] // at depth
+        [TestCase("BHoM_Datasets/versioning_93.json",        ExpectedResult = false)] // name case-insensitive
+        [TestCase("BHoM_Datasets/Versioning_93.JSON",        ExpectedResult = false)] // extension case-insensitive
+
+        // The digit gate. A hand-authored dataset starting with the same word stays in scope,
+        // which is the whole reason the rule is not a bare Versioning_* match.
+        [TestCase("Datasets/Versioning_Rules.json",          ExpectedResult = true)]
+        [TestCase("BHoM_Datasets/Versioning_.json",          ExpectedResult = true)]
+        [TestCase("BHoM_Datasets/Versioning.json",           ExpectedResult = true)]
+
+        // Anchored on the file name, so a directory named for a version does not take the real
+        // datasets under it out of scope.
+        [TestCase("Datasets/Versioning_93/RealDataset.json", ExpectedResult = true)]
+
+        // The prefix has to start the name. A dataset merely containing the word is unaffected.
+        [TestCase("Datasets/MyVersioning_93.json",           ExpectedResult = true)]
+
+        // Pins the anchoring itself rather than the digit test. The name is contrived on
+        // purpose: the prefix has to appear at an offset AND a digit has to sit at the index
+        // the digit test reads, which is the only way the two can disagree. Without it, a
+        // relaxed prefix match still passes every realistic fixture above, because reading a
+        // fixed index lands inside the prefix whenever the prefix is not at the start.
+        [TestCase("Datasets/012345678901Versioning_5.json",  ExpectedResult = true)]
         public bool IsDatasetFile(string file)
             => FileFilter.IsDatasetFile(file);
+
+        // The upgrade-map rule on its own, so a failure says which of the two predicates moved.
+        // These paths carry no "datasets" substring, so IsDatasetFile rejects them anyway and
+        // could not distinguish the two.
+        [TestCase("Tagging_oM/Versioning_93.json",  ExpectedResult = true)]
+        [TestCase("Tagging_oM/Versioning_Rules.json", ExpectedResult = false)]
+        [TestCase("Versioning_93.json",             ExpectedResult = true)]  // no directory at all
+        [TestCase("Structure_oM/Versioning_93.txt", ExpectedResult = true)]  // extension is IsDatasetFile's job
+        public bool IsVersioningUpgradeMap(string file)
+            => FileFilter.IsVersioningUpgradeMap(file);
     }
 }
