@@ -6,9 +6,9 @@ namespace VersioningRunner.Tests
 {
     // The map from a dataset record's type name to the assembly that declared it.
     //
-    // Every fixture here is synthetic and names only public assemblies. Real 9.3 records name
-    // the oM assemblies of private Revit tools, and a test fixture is as much of a leak as a
-    // comment is.
+    // Every fixture here names either a public BHoM assembly or a placeholder that resolves
+    // to nothing. Real records name the oM assemblies of private Revit tools, and a test
+    // fixture carries such a name into a public repository as readily as a comment does.
     public class DatasetProvenanceTests
     {
         // A closed generic. Its name carries commas and brackets, and it is the shape that the
@@ -43,12 +43,12 @@ namespace VersioningRunner.Tests
         public void PresentInOneVersionOnly_IsStillMapped()
         {
             using var datasets = new TempDatasets()
-                .WithObjects("9.2", Record("BH.oM.Tagging.Settings.TagSettings", "Tagging_oM"))
+                .WithObjects("9.2", Record("BH.oM.Environment.Elements.Panel", "Environment_oM"))
                 .WithObjects("9.3", Record("BH.oM.Acoustic.Panel", "Acoustic_oM"));
 
             var map = DatasetProvenance.Build(datasets.Root);
 
-            Assert.Equal("Tagging_oM", map.DeclaringAssemblyFor("BH.oM.Tagging.Settings.TagSettings"));
+            Assert.Equal("Environment_oM", map.DeclaringAssemblyFor("BH.oM.Environment.Elements.Panel"));
             Assert.Equal("Acoustic_oM", map.DeclaringAssemblyFor("BH.oM.Acoustic.Panel"));
         }
 
@@ -104,13 +104,13 @@ namespace VersioningRunner.Tests
         public void YearVariantsAcrossVersions_AreNotADisagreement()
         {
             using var datasets = new TempDatasets()
-                .WithObjects("9.2", Record("BH.oM.Tagging.Settings.TagSettings", "Tagging_oM_2022"))
-                .WithObjects("9.3", Record("BH.oM.Tagging.Settings.TagSettings", "Tagging_oM_2023"));
+                .WithObjects("9.2", Record("BH.oM.Adapters.Revit.Elements.ModelInstance", "Revit_X_oM_2022"))
+                .WithObjects("9.3", Record("BH.oM.Adapters.Revit.Elements.ModelInstance", "Revit_X_oM_2023"));
 
             var map = DatasetProvenance.Build(datasets.Root);
 
             Assert.Empty(map.Disputed);
-            Assert.Equal("Tagging_oM_2022", map.DeclaringAssemblyFor("BH.oM.Tagging.Settings.TagSettings"));
+            Assert.Equal("Revit_X_oM_2022", map.DeclaringAssemblyFor("BH.oM.Adapters.Revit.Elements.ModelInstance"));
         }
 
         [Fact]

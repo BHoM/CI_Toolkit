@@ -155,7 +155,7 @@ public static class DatasetProvenance
     /**** Private Methods             ****/
     /*************************************/
 
-    // Two versions naming Revit_Tagging_oM_2022 and Revit_Tagging_oM_2023 are not disagreeing.
+    // Two versions naming Revit_X_oM_2022 and Revit_X_oM_2023 are not disagreeing.
     // They are the same repository under two build configurations, attribution strips the year
     // anyway, and treating the pair as disputed would drop the finding to the namespace guess
     // for no gain. That is the failure "compare year-insensitively" exists to prevent, applied

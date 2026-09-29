@@ -41,7 +41,7 @@ namespace VersioningRunner.Tests
             "BH.oM.Structure.Results.ResultEnvelope`1[[BH.oM.Structure.Results.ConnectionForce, StructuralEngineering_oM, Version=9.0.0.0, Culture=neutral, PublicKeyToken=null]]";
 
         private const string MethodEvent =
-            "Method ApplyDuctInsulation from { \"_t\" : \"System.Type\", \"Name\" : \"BH.Revit.Engine.MechanicalPlumbing.Compute, Revit_MechanicalPlumbing_Engine_2022, Version=9.0.0.0, Culture=neutral, PublicKeyToken=null\", \"_bhomVersion\" : \"9.2\" } failed to deserialise.";
+            "Method TryGetValueFromSource from { \"_t\" : \"System.Type\", \"Name\" : \"BH.Revit.Engine.Core.Compute, Revit_Core_Engine_2022, Version=9.0.0.0, Culture=neutral, PublicKeyToken=null\", \"_bhomVersion\" : \"9.2\" } failed to deserialise.";
 
         private static FakeTestResult Tree(string description, params string[] events)
         {
@@ -168,12 +168,12 @@ namespace VersioningRunner.Tests
         {
             var diagnostics = new List<FailureDiagnostic>();
             RunCommand.ExtractFilteredResult(
-                Tree("BH.Revit.Engine.MechanicalPlumbing.Compute. }", MethodEvent),
+                Tree("BH.Revit.Engine.Core.Compute. }", MethodEvent),
                 (_, _) => (true, AttributionBasis.NotRecorded), null,
                 (_, _, _) => (null, ClassificationPath.DeclaringTypeNotLoaded, Array.Empty<string>()), diagnostics,
-                provenance: Map(("BH.Revit.Engine.MechanicalPlumbing.Compute. }", "Acoustic_oM")));
+                provenance: Map(("BH.Revit.Engine.Core.Compute. }", "Acoustic_oM")));
 
-            Assert.Equal("Revit_MechanicalPlumbing_Engine_2022", Assert.Single(diagnostics).DeclaringAssembly);
+            Assert.Equal("Revit_Core_Engine_2022", Assert.Single(diagnostics).DeclaringAssembly);
         }
 
         // Whole closure discards the declaring assembly for attribution: Execute wires
@@ -204,15 +204,15 @@ namespace VersioningRunner.Tests
         // ------------------------------------------------------------------
 
         [Theory]
-        [InlineData("Revit_ModelQA_oM_2022")]
-        [InlineData("Revit_ModelQA_oM_2023")]
-        [InlineData("Revit_ModelQA_oM_2024")]
-        [InlineData("Revit_ModelQA_oM_2025")]
-        [InlineData("Revit_ModelQA_oM_2026")]
+        [InlineData("Revit_X_oM_2022")]
+        [InlineData("Revit_X_oM_2023")]
+        [InlineData("Revit_X_oM_2024")]
+        [InlineData("Revit_X_oM_2025")]
+        [InlineData("Revit_X_oM_2026")]
         public void AnyYearAttributesToASubjectBuildingAnyOtherYear(string recordedAssembly)
         {
             // The subject built Release2024, so infer-verification-config staged exactly one year.
-            var closure = ClosureForSubject("Revit_ModelQA_oM_2024.dll");
+            var closure = ClosureForSubject("Revit_X_oM_2024.dll");
 
             Assert.True(RunCommand.IsFromSubjectAssembly(recordedAssembly, closure),
                 $"{recordedAssembly} must attribute to a Release2024 build: all five year variants are " +
@@ -225,10 +225,10 @@ namespace VersioningRunner.Tests
         [Fact]
         public void TheYearIsNotComparedExactly()
         {
-            var closure = ClosureForSubject("Revit_ModelQA_oM_2024.dll");
+            var closure = ClosureForSubject("Revit_X_oM_2024.dll");
 
-            Assert.True(RunCommand.IsFromSubjectAssembly("Revit_ModelQA_oM_2022", closure));
-            Assert.False(RunCommand.IsFromSubjectAssembly("Revit_Tagging_oM_2022", closure));
+            Assert.True(RunCommand.IsFromSubjectAssembly("Revit_X_oM_2022", closure));
+            Assert.False(RunCommand.IsFromSubjectAssembly("Revit_Y_oM_2022", closure));
         }
 
         // StripConfigSuffix is anchored `_20\d{2}$`, so an `_asm` carrying a file extension does
@@ -268,8 +268,8 @@ namespace VersioningRunner.Tests
             RunCommand.ExtractFilteredResult(
                 Tree("BH.oM.Acoustic.Panel"),
                 (_, _) => (true, AttributionBasis.NotRecorded), null, null, diagnostics,
-                probeTypeCandidates: _ => ["Revit_ModelQA_oM_2022", "Revit_ModelQA_oM_2023"],
-                provenance: Map(("BH.oM.Acoustic.Panel", "Revit_ModelQA_oM_2022")));
+                probeTypeCandidates: _ => ["Revit_X_oM_2022", "Revit_X_oM_2023"],
+                provenance: Map(("BH.oM.Acoustic.Panel", "Revit_X_oM_2022")));
 
             var only = Assert.Single(diagnostics);
             Assert.NotNull(only.DeclaringTypeCandidates);
@@ -388,18 +388,18 @@ namespace VersioningRunner.Tests
         [Fact]
         public void AnObjectRecordNamingAnUnbuiltYear_IsStillARealFailure()
         {
-            var closure = ClosureBuilding("Revit_Tagging_oM_2024");
+            var closure = ClosureBuilding("Revit_Y_oM_2024");
             var diagnostics = new List<FailureDiagnostic>();
 
             RunCommand.ExtractFilteredResult(
-                Tree("BH.oM.Tagging.Settings.TagSettings"),
-                RealAttribution(closure, "BH.oM.Tagging.Settings"), null, null, diagnostics,
+                Tree("BH.oM.Adapters.Revit.Elements.ModelInstance"),
+                RealAttribution(closure, "BH.oM.Adapters.Revit.Elements"), null, null, diagnostics,
                 closure: closure,
-                probeTypeCandidates: _ => ["Revit_Tagging_oM_2024"],
-                provenance: Map(("BH.oM.Tagging.Settings.TagSettings", "Revit_Tagging_oM_2022")));
+                probeTypeCandidates: _ => ["Revit_Y_oM_2024"],
+                provenance: Map(("BH.oM.Adapters.Revit.Elements.ModelInstance", "Revit_Y_oM_2022")));
 
             var only = Assert.Single(diagnostics);
-            Assert.Equal("Revit_Tagging_oM_2022", only.DeclaringAssembly);
+            Assert.Equal("Revit_Y_oM_2022", only.DeclaringAssembly);
             Assert.Equal(AttributionBasis.DeclaringAssembly, only.AttributedBy);
             Assert.Null(only.Cause);
             Assert.Equal(ClassificationPath.NoMethodEvent, only.Path);
@@ -414,15 +414,15 @@ namespace VersioningRunner.Tests
         [Fact]
         public void AnObjectRecordNamingABuiltYear_IsAlsoARealFailure()
         {
-            var closure = ClosureBuilding("Revit_Tagging_oM_2022");
+            var closure = ClosureBuilding("Revit_Y_oM_2022");
             var diagnostics = new List<FailureDiagnostic>();
 
             RunCommand.ExtractFilteredResult(
-                Tree("BH.oM.Tagging.Settings.TagSettings"),
-                RealAttribution(closure, "BH.oM.Tagging.Settings"), null, null, diagnostics,
+                Tree("BH.oM.Adapters.Revit.Elements.ModelInstance"),
+                RealAttribution(closure, "BH.oM.Adapters.Revit.Elements"), null, null, diagnostics,
                 closure: closure,
-                probeTypeCandidates: _ => ["Revit_Tagging_oM_2022"],
-                provenance: Map(("BH.oM.Tagging.Settings.TagSettings", "Revit_Tagging_oM_2022")));
+                probeTypeCandidates: _ => ["Revit_Y_oM_2022"],
+                provenance: Map(("BH.oM.Adapters.Revit.Elements.ModelInstance", "Revit_Y_oM_2022")));
 
             Assert.True(Assert.Single(diagnostics).CountedAsReal);
         }
@@ -433,7 +433,7 @@ namespace VersioningRunner.Tests
         [Fact]
         public void AnObjectRecordDeclaredByAnotherRepository_IsDroppedAtAttribution()
         {
-            var closure = ClosureBuilding("Revit_Tagging_oM_2024");
+            var closure = ClosureBuilding("Revit_Y_oM_2024");
             var diagnostics = new List<FailureDiagnostic>();
 
             RunCommand.ExtractFilteredResult(
