@@ -354,6 +354,99 @@ namespace VersioningRunner.Tests
         }
 
         // ------------------------------------------------------------------
+        // Attribution and reclassification driven together, through the real
+        // AttributeToSubject rather than a stub.
+        //
+        // No test supplied both dataset provenance and a closure until this point, which is
+        // why the case below went unnoticed: with a stubbed isAttributable the coupling
+        // between the two is never exercised.
+        // ------------------------------------------------------------------
+
+        // A closure as a real run has one: the subject built one Revit year, and that year is
+        // loaded. ClosureForSubject leaves both loaded sets empty, which cannot reach the
+        // reclassification block at all.
+        private static ClosureContext ClosureBuilding(string loadedAssembly)
+        {
+            var loaded = new HashSet<string>([loadedAssembly], StringComparer.Ordinal);
+            var bases = new HashSet<string>(loaded.Select(RunCommand.StripConfigSuffix), StringComparer.Ordinal);
+            return new ClosureContext(loaded, bases, bases);
+        }
+
+        private static Func<string, string?, (bool, AttributionBasis)> RealAttribution(
+            ClosureContext closure, params string[] subjectNamespaces)
+        {
+            var ns = new HashSet<string>(subjectNamespaces, StringComparer.Ordinal);
+            return (d, asm) => RunCommand.AttributeToSubject(d, asm, ns, closure);
+        }
+
+        // The dataset records the lowest Revit year present at capture, which is 2022 on every
+        // one of the 162 year-suffixed records in 9.3. A repository that has moved on builds a
+        // later year. That is a difference in how the field was written, not a statement that a
+        // configuration was skipped, and the finding is real: the record was deserialised
+        // against the assemblies that are loaded, and it failed against them. There is no
+        // per-assembly probe here to have been unable to run.
+        [Fact]
+        public void AnObjectRecordNamingAnUnbuiltYear_IsStillARealFailure()
+        {
+            var closure = ClosureBuilding("Revit_Tagging_oM_2024");
+            var diagnostics = new List<FailureDiagnostic>();
+
+            RunCommand.ExtractFilteredResult(
+                Tree("BH.oM.Tagging.Settings.TagSettings"),
+                RealAttribution(closure, "BH.oM.Tagging.Settings"), null, null, diagnostics,
+                closure: closure,
+                probeTypeCandidates: _ => ["Revit_Tagging_oM_2024"],
+                provenance: Map(("BH.oM.Tagging.Settings.TagSettings", "Revit_Tagging_oM_2022")));
+
+            var only = Assert.Single(diagnostics);
+            Assert.Equal("Revit_Tagging_oM_2022", only.DeclaringAssembly);
+            Assert.Equal(AttributionBasis.DeclaringAssembly, only.AttributedBy);
+            Assert.Null(only.Cause);
+            Assert.Equal(ClassificationPath.NoMethodEvent, only.Path);
+            Assert.True(only.CountedAsReal,
+                "an object record is deserialised against what is loaded, so a failure is real: "
+                + "the recorded Revit year is how the field was written, not a configuration that was skipped");
+        }
+
+        // The same record where the repository does still build the recorded year. This one
+        // never reached the reclassification block, because the exact name is loaded, and it is
+        // here so the fix is not credited with behaviour that already worked.
+        [Fact]
+        public void AnObjectRecordNamingABuiltYear_IsAlsoARealFailure()
+        {
+            var closure = ClosureBuilding("Revit_Tagging_oM_2022");
+            var diagnostics = new List<FailureDiagnostic>();
+
+            RunCommand.ExtractFilteredResult(
+                Tree("BH.oM.Tagging.Settings.TagSettings"),
+                RealAttribution(closure, "BH.oM.Tagging.Settings"), null, null, diagnostics,
+                closure: closure,
+                probeTypeCandidates: _ => ["Revit_Tagging_oM_2022"],
+                provenance: Map(("BH.oM.Tagging.Settings.TagSettings", "Revit_Tagging_oM_2022")));
+
+            Assert.True(Assert.Single(diagnostics).CountedAsReal);
+        }
+
+        // Attribution, not reclassification, is what drops another repository's record, and it
+        // drops it before the block is reached. Pinned because it is the outcome the block's
+        // foreign branch looks like it provides and does not.
+        [Fact]
+        public void AnObjectRecordDeclaredByAnotherRepository_IsDroppedAtAttribution()
+        {
+            var closure = ClosureBuilding("Revit_Tagging_oM_2024");
+            var diagnostics = new List<FailureDiagnostic>();
+
+            RunCommand.ExtractFilteredResult(
+                Tree("BH.oM.Structure.Elements.Panel"),
+                RealAttribution(closure, "BH.oM.Structure.Elements"), null, null, diagnostics,
+                closure: closure,
+                probeTypeCandidates: _ => ["Structure_oM"],
+                provenance: Map(("BH.oM.Structure.Elements.Panel", "Structure_oM")));
+
+            Assert.Empty(diagnostics);
+        }
+
+        // ------------------------------------------------------------------
         // Closed generics. The class the earlier message-based route silently lost.
         // ------------------------------------------------------------------
 

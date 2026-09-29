@@ -710,7 +710,24 @@ public static class RunCommand
             // describes code we were never asked about. When nothing answered, the path is
             // DeclaringTypeNotLoaded, which is the signal that the type is genuinely gone;
             // reclassifying that would convert a real removal into a silent pass.
+            // Not for object records, and provenanceType is how they are told apart: it is set
+            // only when the dataset answered.
+            //
+            // Both outcomes below need a per-assembly probe to have been prevented from running,
+            // and an object record has none. It is deserialised against whatever is loaded, so a
+            // failure is a failure of the code that was built, and "that configuration was not
+            // compiled" is not an escape available to it. The declaring assembly here is also
+            // not evidence about which configuration ran: the backfill records the lowest Revit
+            // year present at capture, 2022 on all 162 year-suffixed records in 9.3, so matching
+            // it exactly against LoadedNames asks a question about how the field was written.
+            // That is the exact-year comparison the locked decisions rule out.
+            //
+            // Without this, a repository that has moved past 2022 sees a real object-record
+            // regression demoted to unverified with a cause that reads as a build gap: Error
+            // becomes Warning and the job exits 0. Nine assembly families are exposed and all
+            // nine still build 2022 today, so it is latent until one of them drops it.
             if (cause is null && closure is not null && declaringAssembly is not null
+                && provenanceType is null
                 && candidates.Count > 0
                 && !closure.LoadedNames.Contains(declaringAssembly))
             {
