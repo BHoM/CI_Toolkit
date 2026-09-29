@@ -41,9 +41,9 @@ public class FileFilterTests
         [TestCase("DataSets/foo.json",        ExpectedResult = true)]  // root-level, mixed case
         [TestCase("DataSets/LCA/deep/x.json", ExpectedResult = true)]  // root-level, nested
 
-        // Versioning upgrade maps. The live case is a project directory supplying the
-        // "datasets" substring, which is how BuroHappold_Datasets/Versioning_93.json and
-        // BHoM_Datasets/Versioning_100.json get selected at all.
+        // Versioning upgrade maps. A project directory supplying the "datasets" substring is
+        // the only way a file named like this is selected at all, and BHoM_Datasets has that
+        // layout: one .csproj in a directory whose name carries the substring.
         [TestCase("BHoM_Datasets/Versioning_93.json",        ExpectedResult = false)]
         [TestCase("BHoM_Datasets/Versioning_100.json",       ExpectedResult = false)]
         [TestCase(@"BHoM_Datasets\Versioning_93.json",       ExpectedResult = false)] // backslash separators
@@ -77,8 +77,8 @@ public class FileFilterTests
         // The upgrade-map rule on its own, so a failure says which of the two predicates moved.
         // These paths carry no "datasets" substring, so IsDatasetFile rejects them anyway and
         // could not distinguish the two.
-        [TestCase("Tagging_oM/Versioning_93.json",  ExpectedResult = true)]
-        [TestCase("Tagging_oM/Versioning_Rules.json", ExpectedResult = false)]
+        [TestCase("Structure_oM/Versioning_93.json",   ExpectedResult = true)]
+        [TestCase("Structure_oM/Versioning_Rules.json", ExpectedResult = false)]
         [TestCase("Versioning_93.json",             ExpectedResult = true)]  // no directory at all
         [TestCase("Structure_oM/Versioning_93.txt", ExpectedResult = true)]  // extension is IsDatasetFile's job
         public bool IsVersioningUpgradeMap(string file)
