@@ -16,7 +16,8 @@ public static class RunCommand
         bool testAll,
         string? subjectAssemblyList = null,
         string? configuration = null,
-        IReadOnlyCollection<string>? versionConditionalMethods = null)
+        IReadOnlyCollection<string>? versionConditionalMethods = null,
+        string? datasetsPath = null)
     {
         s_configuration = configuration;
         s_versionConditional = versionConditionalMethods is null
@@ -29,6 +30,26 @@ public static class RunCommand
             Console.WriteLine("Version-conditional method list: scan performed, no version-conditional methods in this repository. Findings record No.");
         else
             Console.WriteLine($"Version-conditional method list: scan performed, {s_versionConditional.Count} method(s) found.");
+
+        // Built before the assemblies load, so a broken precondition costs nothing. The two
+        // states it throws on are a missing dataset root and a root holding no Objects.json,
+        // and both mean no object record could be attributed by declaring assembly. Neither is
+        // reachable through ci-versioning, whose "Validate versioning datasets" step already
+        // exits 1 on the same conditions before this runs.
+        DeclaringAssemblyMap provenance;
+        try
+        {
+            provenance = datasetsPath is null
+                ? DeclaringAssemblyMap.Empty
+                : DatasetProvenance.Build(datasetsPath);
+        }
+        catch (DatasetProvenanceException ex)
+        {
+            Console.Error.WriteLine($"::error title=Versioning::{ex.Message}");
+            return 1;
+        }
+
+        ReportProvenance(provenance, datasetsPath);
 
         var loaded = LoadAssemblies(assembliesPath);
 
@@ -161,7 +182,7 @@ public static class RunCommand
                 return 1;
             }
 
-            var partial = ExtractFilteredResult(rawResult, isAttributable, unresolvableSkips, probeSignature, diagnostics, closure, typeIndex, probeTypeCandidates);
+            var partial = ExtractFilteredResult(rawResult, isAttributable, unresolvableSkips, probeSignature, diagnostics, closure, typeIndex, probeTypeCandidates, provenance);
             allFailures.AddRange(partial.Failures);
         }
 
@@ -280,7 +301,8 @@ public static class RunCommand
             SubjectAssemblies: s_subjectAssemblyCount,
             SubjectTypes: s_subjectTypeCount,
             DatasetVersions: testAll ? 0 : 1,
-            RecordsUnverified: unresolvableSkips.Count);
+            RecordsUnverified: unresolvableSkips.Count,
+            TypesWithDeclaringAssembly: provenance.TypesMapped);
 
         var result = new VersioningResult
         {
@@ -507,7 +529,10 @@ public static class RunCommand
         LoadedTypeIndex? typeIndex = null,
         // Null means object-record ambiguity is not scanned, which is the pre-existing
         // behaviour and what every caller that does not supply a closure should get.
-        Func<string, IReadOnlyList<string>>? probeTypeCandidates = null)
+        Func<string, IReadOnlyList<string>>? probeTypeCandidates = null,
+        // The dataset's answer for an object record's declaring assembly. Empty by default, so
+        // a caller that supplies nothing keeps the namespace fallback it had before.
+        DeclaringAssemblyMap? provenance = null)
     {
         if (rawResult is null)
             return new VersioningResult
@@ -518,7 +543,7 @@ public static class RunCommand
             };
 
         var failures = new List<FailureInfo>();
-        CollectLeafFailures(rawResult, isAttributable, failures, unresolvableSkips, probeSignature, diagnostics, closure, typeIndex ?? LoadedTypeIndex.Empty, probeTypeCandidates, depth: 0);
+        CollectLeafFailures(rawResult, isAttributable, failures, unresolvableSkips, probeSignature, diagnostics, closure, typeIndex ?? LoadedTypeIndex.Empty, probeTypeCandidates, provenance ?? DeclaringAssemblyMap.Empty, depth: 0);
 
         var status = failures.Count > 0 ? VersioningStatus.Error : VersioningStatus.Pass;
         return new VersioningResult
@@ -536,7 +561,8 @@ public static class RunCommand
         List<UnverifiedFailure>? unresolvableSkips,
         Func<string, string, string?, (string? Cause, ClassificationPath Path, IReadOnlyList<string> Candidates)>? probeSignature,
         List<FailureDiagnostic>? diagnostics, ClosureContext? closure,
-        LoadedTypeIndex typeIndex, Func<string, IReadOnlyList<string>>? probeTypeCandidates, int depth)
+        LoadedTypeIndex typeIndex, Func<string, IReadOnlyList<string>>? probeTypeCandidates,
+        DeclaringAssemblyMap provenance, int depth)
     {
         // BHoM's TestResult tree has at most 3 levels under the root (outer → per-version
         // summary → individual type result). Depth 5 gives headroom for unexpected nesting
@@ -589,18 +615,35 @@ public static class RunCommand
                 .FirstOrDefault(a => a is not null);
 
             // Object records carry no Method event, so the assembly comes from the dataset's
-            // `_asm` field instead, surfaced as its own event. Consulted only when the Method
-            // event yielded nothing, so the method path is untouched: a record cannot be both.
-            // Null throughout until Versioning_Toolkit emits the event, which is what makes
-            // this change inert on its own.
-            string? objectTypeName = null;
+            // `_asm` field instead, read from the staged Objects.json rather than from anything
+            // in this tree. Consulted only when the Method event yielded nothing, so the method
+            // path is untouched: a record cannot be both.
+            //
+            // The description is the join key because for an object record it is the `_t` value
+            // verbatim. That is structural rather than lucky: FromJsonItem reaches IToText only
+            // when the result is non-null and not a CustomObject, and every path with that
+            // combination returns a PassResult, so an Error leaf always carries
+            // DescriptionFromJson's output, which is the record's first quoted field.
+            //
+            // Null throughout until the dataset carries `_asm`, which is what makes this change
+            // inert on its own.
+            string? provenanceType = null;
+            IReadOnlyList<string>? disputedAssemblies = null;
             if (declaringAssembly is null)
             {
-                var objectEvent = eventMessages
-                    .Select(ParseObjectEventAssembly)
-                    .FirstOrDefault(p => p.Assembly is not null);
-                objectTypeName = objectEvent.TypeName;
-                declaringAssembly = objectEvent.Assembly;
+                string? fromDataset = provenance.DeclaringAssemblyFor(desc);
+                if (fromDataset is not null)
+                {
+                    declaringAssembly = fromDataset;
+                    provenanceType = desc;
+                }
+                else if (provenance.Disputed.TryGetValue(desc, out IReadOnlyList<string>? claims))
+                {
+                    // Versions named different assembly families for this type. Left unattributed
+                    // on purpose: picking one would be a guess dressed as a fact, and the
+                    // namespace fallback at least records itself as a guess.
+                    disputedAssemblies = claims;
+                }
             }
 
             var (attributable, attributedBy) = isAttributable(desc, declaringAssembly);
@@ -639,8 +682,19 @@ public static class RunCommand
                     // than normalise it away silently. Without this the metric below can never
                     // count an object record, because candidates only ever came from the
                     // method probe.
-                    if (probeTypeCandidates is not null && objectTypeName is not null)
-                        candidates = probeTypeCandidates(objectTypeName);
+                    //
+                    // The field carries two kinds of ambiguity and they are not the same
+                    // question. Dataset versions disagreeing about which assembly declared the
+                    // type takes precedence, because in that case nothing resolved and scanning
+                    // the closure would answer a question nobody asked. Otherwise it is the
+                    // original one: how many loaded assemblies could have declared it. The
+                    // dataset case is reported separately at run level, so the two remain
+                    // tellable apart; measured 0 across the 1711 type names the two backfilled
+                    // versions share.
+                    if (disputedAssemblies is not null)
+                        candidates = disputedAssemblies;
+                    else if (probeTypeCandidates is not null && provenanceType is not null)
+                        candidates = probeTypeCandidates(provenanceType);
                 }
                 else if (probeSignature is not null)
                     (cause, path, candidates) = probeSignature(eventType, eventMethod, declaringAssembly);
@@ -729,7 +783,7 @@ public static class RunCommand
             {
                 string childStatus = child.GetType().GetProperty("Status")?.GetValue(child)?.ToString() ?? "Pass";
                 if (childStatus is "Error" or "Warning")
-                    CollectLeafFailures(child, isAttributable, failures, unresolvableSkips, probeSignature, diagnostics, closure, typeIndex, probeTypeCandidates, depth + 1);
+                    CollectLeafFailures(child, isAttributable, failures, unresolvableSkips, probeSignature, diagnostics, closure, typeIndex, probeTypeCandidates, provenance, depth + 1);
             }
         }
     }
@@ -1021,50 +1075,59 @@ public static class RunCommand
         return assembly.Length > 0 ? assembly : null;
     }
 
-    // Object records have no Method event, so until now they had no declaring assembly at all
-    // and always fell to the namespace guess. The dataset's `_asm` field closes that, and this
-    // is the wire format it arrives in:
+    // What the dataset read produced, on stdout beside Attribution and Classification because
+    // it is coverage evidence rather than an annotation.
     //
-    //     Object <FullTypeName> declared in "<AssemblyName>"
-    //
-    // THIS IS A CONTRACT. Versioning_Toolkit's FromJson.cs must emit exactly this shape for the
-    // field to be read; nothing else in the runner can see the dataset.
-    //
-    // The quoted part holds the assembly ALONE, and that is a correction rather than a
-    // preference. This first mirrored the Method event's assembly-qualified "Name",
-    // `"<TypeName>, <AssemblyName>"`, and that shape cannot represent the data: a closed generic
-    // type name contains commas, e.g.
-    //
-    //     BH.oM.Structure.Results.ResultEnvelope`1[[BH.oM.Structure.Results.ConnectionForce,
-    //                                               StructuralEngineering_oM, Version=...]]
-    //
-    // so a comma-delimited group stopped at the first argument and the match failed. Measured
-    // over the 9.2 dataset, the earlier shape parsed 1,690 of 1,713 records and **silently lost
-    // 23**, each falling back to the namespace guess with no diagnostic. One of the 23 is
-    // attributed to the wrong repository by that fallback, which is the exact defect this field
-    // exists to remove. An assembly simple name can never contain a quote, so the assembly-only
-    // form is unambiguous and parses 1,713 of 1,713.
-    //
-    // The type is still carried, in the leading position, where it needs no delimiter.
-    private static readonly Regex _objectEventAssemblyPattern = new(
-        @"^Object\s+(?<type>.+?)\s+declared\s+in\s+""(?<assembly>[^""]+)""$",
-        RegexOptions.Compiled);
-
-    // The declaring type is returned alongside the assembly because the ambiguity scan needs a
-    // type name and the leaf's Description is not reliably one: DescriptionFromJson mangles
-    // some entries. The event states it directly.
-    public static (string? TypeName, string? Assembly) ParseObjectEventAssembly(string message)
+    // Printed in every state, including the two that report nothing. An empty map reads
+    // identically whether the dataset carries no `_asm` yet, or the path was never supplied, or
+    // the runner read a tree with nothing in it, and those need different action. A number that
+    // appears only when it is non-zero cannot be told from one nobody measured.
+    private static void ReportProvenance(DeclaringAssemblyMap provenance, string? datasetsPath)
     {
-        if (string.IsNullOrEmpty(message))
-            return (null, null);
+        if (datasetsPath is null)
+        {
+            Console.WriteLine(
+                "Provenance: no dataset path supplied, so no object record can be attributed by "
+                + "declaring assembly and every one falls back to the namespace guess.");
+            return;
+        }
 
-        var match = _objectEventAssemblyPattern.Match(message);
-        if (!match.Success)
-            return (null, null);
+        Console.WriteLine(
+            $"Provenance: {provenance.VersionsRead} dataset version(s), {provenance.RecordsRead} record(s), "
+            + $"{provenance.TypesMapped} type(s) mapped to a declaring assembly, "
+            + $"{provenance.Disputed.Count} disputed.");
 
-        string type = match.Groups["type"].Value.Trim();
-        string assembly = match.Groups["assembly"].Value.Trim();
-        return (type.Length > 0 ? type : null, assembly.Length > 0 ? assembly : null);
+        if (provenance.RecordsRead > 0 && provenance.TypesMapped == 0 && provenance.Disputed.Count == 0)
+        {
+            Console.WriteLine(
+                $"Provenance: 0 of {provenance.RecordsRead} record(s) carry the declaring-assembly field, "
+                + "so object records are attributed by namespace as before. Expected until the dataset "
+                + "backfill lands.");
+        }
+
+        if (provenance.LinesUnparseable > 0)
+        {
+            Console.Error.WriteLine(
+                $"::warning title=Versioning::{provenance.LinesUnparseable} dataset record(s) could not be "
+                + "parsed and were skipped, so any finding on one of them falls back to the namespace guess.");
+        }
+
+        // Measured 0 across the 1711 type names the two backfilled versions share, so this is
+        // expected to stay silent. It is a warning rather than a counter because the first time
+        // it is not silent is the first time a type name stops identifying one repository, and
+        // that is worth someone reading rather than a number in an artefact.
+        if (provenance.Disputed.Count > 0)
+        {
+            var named = provenance.Disputed
+                .OrderBy(d => d.Key, StringComparer.Ordinal)
+                .Take(10)
+                .Select(d => $"{d.Key} ({string.Join(", ", d.Value)})");
+
+            Console.Error.WriteLine(
+                $"::warning title=Versioning::{provenance.Disputed.Count} type(s) are named with different "
+                + "declaring assemblies by different dataset versions, so they are left to the namespace "
+                + $"guess rather than resolved to one: {string.Join("; ", named)}");
+        }
     }
 
     // Every loaded assembly that yields the named type. The type-only half of

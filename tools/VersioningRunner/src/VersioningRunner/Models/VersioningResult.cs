@@ -165,7 +165,12 @@ public record CoverageCounts(
     // Present so a green cannot be read as a clean sweep of SubjectTypes: a run reporting
     // 1191 types checked and 145 records unverified has not examined what the first number
     // implies. Counts records, not types, because that is the unit the dataset iterates.
-    int RecordsUnverified = 0);
+    int RecordsUnverified = 0,
+    // Type names the staged dataset resolved to a declaring assembly. Zero means every object
+    // record was attributed by namespace prefix, which is the pre-backfill state and reads
+    // identically in the artefact to a run that never found the dataset at all. The log says
+    // which, for 90 days; this is the part that outlives it.
+    int TypesWithDeclaringAssembly = 0);
 
 public class VersioningResult
 {

@@ -9,14 +9,28 @@ namespace VersioningRunner.Tests
     // Object records carry a type name and nothing else, so attribution has always guessed from
     // the namespace. The dataset's `_asm` field closes that, and these pin the runner half.
     //
-    // Every test here drives a synthetic TestResult, because the runner has no other view of the
-    // dataset and Versioning_Toolkit does not emit the event yet. That is the limit of this
-    // coverage: it proves the runner handles the format it defines, not that anything produces it.
+    // Where the map comes from is DatasetProvenanceTests' subject. These drive it in as a value,
+    // because what they pin is how a leaf consumes it: the join key, the Method event's
+    // precedence over it, and what a disagreement does. The join key is the leaf description,
+    // which for an object record is the `_t` value verbatim.
+    //
+    // The limit of this coverage: it proves the runner reads a map correctly, not that a live
+    // FromJsonDatasets tree produces leaves that hit one. Only a real run shows that.
     public class ObjectRecordProvenanceTests
     {
-        // The contract Versioning_Toolkit's FromJson.cs is bound to emit.
-        private static string ObjectEvent(string type, string assembly) =>
-            $"Object {type} declared in \"{assembly}\"";
+        // What the staged Objects.json resolved, as the collector receives it.
+        private static DeclaringAssemblyMap Map(params (string Type, string Assembly)[] entries)
+            => new(
+                entries.ToDictionary(e => e.Type, e => e.Assembly, StringComparer.Ordinal),
+                new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal),
+                VersionsRead: 1, RecordsRead: entries.Length, TypesMapped: entries.Length, LinesUnparseable: 0);
+
+        // A type two dataset versions named different assembly families for.
+        private static DeclaringAssemblyMap Disputed(string type, params string[] assemblies)
+            => new(
+                new Dictionary<string, string>(StringComparer.Ordinal),
+                new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal) { [type] = assemblies },
+                VersionsRead: 2, RecordsRead: assemblies.Length, TypesMapped: 0, LinesUnparseable: 0);
 
         // A closed generic. Its name contains commas, which is why the quoted part holds the
         // assembly alone: a comma-delimited form silently lost all 23 of these in the 9.2
@@ -63,25 +77,32 @@ namespace VersioningRunner.Tests
         // Reading the field
         // ------------------------------------------------------------------
 
+        // The join. The leaf's description is the record's `_t` value, so the map is keyed on
+        // exactly what arrives here. Measured on the 15 saved run artefacts: 205 of 205
+        // object-record findings match a dataset record on this key, with no fuzzy matching.
         [Fact]
-        public void ObjectEvent_YieldsTheDeclaringAssemblyAndType()
-        {
-            var (type, assembly) = RunCommand.ParseObjectEventAssembly(
-                ObjectEvent("BH.oM.Acoustic.Panel", "Acoustic_oM"));
-
-            Assert.Equal("BH.oM.Acoustic.Panel", type);
-            Assert.Equal("Acoustic_oM", assembly);
-        }
-
-        [Fact]
-        public void DeclaringAssemblyFromAnObjectEvent_ReachesTheDiagnostic()
+        public void TheLeafDescriptionIsTheKeyIntoTheMap()
         {
             var diagnostics = new List<FailureDiagnostic>();
             RunCommand.ExtractFilteredResult(
-                Tree("BH.oM.Acoustic.Panel", ObjectEvent("BH.oM.Acoustic.Panel", "Acoustic_oM")),
-                (_, _) => (true, AttributionBasis.NotRecorded), null, null, diagnostics);
+                Tree("BH.oM.Acoustic.Panel"),
+                (_, _) => (true, AttributionBasis.NotRecorded), null, null, diagnostics,
+                provenance: Map(("BH.oM.Acoustic.Panel", "Acoustic_oM")));
 
             Assert.Equal("Acoustic_oM", Assert.Single(diagnostics).DeclaringAssembly);
+        }
+
+        // A map that answers for other types but not this one leaves the leaf where it was.
+        [Fact]
+        public void ATypeTheDatasetDoesNotNameIsNotGivenAnAssembly()
+        {
+            var diagnostics = new List<FailureDiagnostic>();
+            RunCommand.ExtractFilteredResult(
+                Tree("BH.oM.Acoustic.Panel"),
+                (_, _) => (true, AttributionBasis.NotRecorded), null, null, diagnostics,
+                provenance: Map(("BH.oM.Structure.Elements.Panel", "Structure_oM")));
+
+            Assert.Null(Assert.Single(diagnostics).DeclaringAssembly);
         }
 
         // The whole point of the field: this record used to be attributable only by prefix.
@@ -113,8 +134,10 @@ namespace VersioningRunner.Tests
         // Inertness. These are the tests that say this PR does nothing on its own.
         // ------------------------------------------------------------------
 
+        // No map supplied at all, which is what every caller that does not pass one gets and
+        // what the runner does without --datasets. Identical to the behaviour before this change.
         [Fact]
-        public void NoObjectEvent_LeavesTheDeclaringAssemblyNull()
+        public void NoMap_LeavesTheDeclaringAssemblyNull()
         {
             var diagnostics = new List<FailureDiagnostic>();
             RunCommand.ExtractFilteredResult(
@@ -124,19 +147,31 @@ namespace VersioningRunner.Tests
             Assert.Null(Assert.Single(diagnostics).DeclaringAssembly);
         }
 
-        // A record cannot be both, and the method path must not change. If both events are
-        // present the Method event still wins, because it is read first and the object read is
-        // only consulted when it yielded nothing.
+        // The dataset read before the backfill lands: records present, none carrying the field.
         [Fact]
-        public void MethodEventStillWins_WhenBothArePresent()
+        public void AnEmptyMap_LeavesTheDeclaringAssemblyNull()
         {
             var diagnostics = new List<FailureDiagnostic>();
             RunCommand.ExtractFilteredResult(
-                Tree("BH.Revit.Engine.MechanicalPlumbing.Compute. }",
-                     MethodEvent,
-                     ObjectEvent("BH.oM.Acoustic.Panel", "Acoustic_oM")),
+                Tree("BH.oM.Acoustic.Panel"),
+                (_, _) => (true, AttributionBasis.NotRecorded), null, null, diagnostics,
+                provenance: DeclaringAssemblyMap.Empty);
+
+            Assert.Null(Assert.Single(diagnostics).DeclaringAssembly);
+        }
+
+        // A record cannot be both, and the method path must not change. If the map happens to
+        // answer for a method leaf's description, the Method event still wins, because it is
+        // read first and the dataset is only consulted when it yielded nothing.
+        [Fact]
+        public void MethodEventStillWins_WhenTheMapAlsoAnswers()
+        {
+            var diagnostics = new List<FailureDiagnostic>();
+            RunCommand.ExtractFilteredResult(
+                Tree("BH.Revit.Engine.MechanicalPlumbing.Compute. }", MethodEvent),
                 (_, _) => (true, AttributionBasis.NotRecorded), null,
-                (_, _, _) => (null, ClassificationPath.DeclaringTypeNotLoaded, Array.Empty<string>()), diagnostics);
+                (_, _, _) => (null, ClassificationPath.DeclaringTypeNotLoaded, Array.Empty<string>()), diagnostics,
+                provenance: Map(("BH.Revit.Engine.MechanicalPlumbing.Compute. }", "Acoustic_oM")));
 
             Assert.Equal("Revit_MechanicalPlumbing_Engine_2022", Assert.Single(diagnostics).DeclaringAssembly);
         }
@@ -155,8 +190,9 @@ namespace VersioningRunner.Tests
 
             var withAsm = new List<FailureDiagnostic>();
             RunCommand.ExtractFilteredResult(
-                Tree("BH.oM.Acoustic.Panel", ObjectEvent("BH.oM.Acoustic.Panel", "Somebody_Elses_oM")),
-                wholeClosure, null, null, withAsm);
+                Tree("BH.oM.Acoustic.Panel"),
+                wholeClosure, null, null, withAsm,
+                provenance: Map(("BH.oM.Acoustic.Panel", "Somebody_Elses_oM")));
 
             Assert.Equal(AttributionBasis.NotRecorded, Assert.Single(withAsm).AttributedBy);
             Assert.True(withAsm[0].CountedAsReal);
@@ -230,9 +266,10 @@ namespace VersioningRunner.Tests
         {
             var diagnostics = new List<FailureDiagnostic>();
             RunCommand.ExtractFilteredResult(
-                Tree("BH.oM.Acoustic.Panel", ObjectEvent("BH.oM.Acoustic.Panel", "Revit_ModelQA_oM_2022")),
+                Tree("BH.oM.Acoustic.Panel"),
                 (_, _) => (true, AttributionBasis.NotRecorded), null, null, diagnostics,
-                probeTypeCandidates: _ => ["Revit_ModelQA_oM_2022", "Revit_ModelQA_oM_2023"]);
+                probeTypeCandidates: _ => ["Revit_ModelQA_oM_2022", "Revit_ModelQA_oM_2023"],
+                provenance: Map(("BH.oM.Acoustic.Panel", "Revit_ModelQA_oM_2022")));
 
             var only = Assert.Single(diagnostics);
             Assert.NotNull(only.DeclaringTypeCandidates);
@@ -245,27 +282,65 @@ namespace VersioningRunner.Tests
         {
             var diagnostics = new List<FailureDiagnostic>();
             RunCommand.ExtractFilteredResult(
-                Tree("BH.oM.Acoustic.Panel", ObjectEvent("BH.oM.Acoustic.Panel", "Acoustic_oM")),
+                Tree("BH.oM.Acoustic.Panel"),
                 (_, _) => (true, AttributionBasis.NotRecorded), null, null, diagnostics,
-                probeTypeCandidates: _ => ["Acoustic_oM"]);
+                probeTypeCandidates: _ => ["Acoustic_oM"],
+                provenance: Map(("BH.oM.Acoustic.Panel", "Acoustic_oM")));
 
             Assert.Null(Assert.Single(diagnostics).DeclaringTypeCandidates);
         }
 
-        // Without the object event there is no type to scan, so the probe is never called and
-        // the pre-existing behaviour stands. This is the other half of inertness.
+        // Nothing resolved, so there is no type the dataset vouched for and scanning the closure
+        // would answer a question nobody asked. This is the other half of inertness.
         [Fact]
-        public void NoObjectEvent_DoesNotScanForCandidates()
+        public void NoMapEntry_DoesNotScanForCandidates()
         {
             bool called = false;
             var diagnostics = new List<FailureDiagnostic>();
             RunCommand.ExtractFilteredResult(
                 Tree("BH.oM.Acoustic.Panel", "Failed to convert the string into a type: BH.oM.Acoustic.Panel"),
                 (_, _) => (true, AttributionBasis.NotRecorded), null, null, diagnostics,
-                probeTypeCandidates: _ => { called = true; return []; });
+                probeTypeCandidates: _ => { called = true; return []; },
+                provenance: DeclaringAssemblyMap.Empty);
 
-            Assert.False(called, "a record with no object event has no type to scan and must not be probed");
+            Assert.False(called, "a record the dataset does not answer for must not be probed");
             Assert.Null(Assert.Single(diagnostics).DeclaringTypeCandidates);
+        }
+
+        // Versions disagreeing is not resolved by picking one. The finding stays unattributed
+        // and carries what the dataset claimed, so the ambiguity is counted rather than
+        // normalised away. Measured 0 across the 1711 type names the two backfilled versions
+        // share, so this path is expected to stay empty and is pinned so it stays honest if not.
+        [Fact]
+        public void ADisputedTypeIsLeftUnattributedAndCarriesTheClaims()
+        {
+            var diagnostics = new List<FailureDiagnostic>();
+            RunCommand.ExtractFilteredResult(
+                Tree("BH.oM.Structure.Elements.Panel"),
+                (_, _) => (true, AttributionBasis.NotRecorded), null, null, diagnostics,
+                provenance: Disputed("BH.oM.Structure.Elements.Panel", "StructuralEngineering_oM", "Structure_oM"));
+
+            var only = Assert.Single(diagnostics);
+            Assert.Null(only.DeclaringAssembly);
+            Assert.Equal(["StructuralEngineering_oM", "Structure_oM"], only.DeclaringTypeCandidates!);
+        }
+
+        // The dataset's disagreement is the answer, not the closure's. Probing would replace a
+        // statement about which assembly declared the type with a statement about which
+        // assemblies could have, and they are different questions.
+        [Fact]
+        public void ADisputedTypeDoesNotFallBackToTheClosureScan()
+        {
+            bool called = false;
+            var diagnostics = new List<FailureDiagnostic>();
+            RunCommand.ExtractFilteredResult(
+                Tree("BH.oM.Structure.Elements.Panel"),
+                (_, _) => (true, AttributionBasis.NotRecorded), null, null, diagnostics,
+                probeTypeCandidates: _ => { called = true; return ["Something_Else_oM"]; },
+                provenance: Disputed("BH.oM.Structure.Elements.Panel", "StructuralEngineering_oM", "Structure_oM"));
+
+            Assert.False(called);
+            Assert.Equal(["StructuralEngineering_oM", "Structure_oM"], Assert.Single(diagnostics).DeclaringTypeCandidates!);
         }
 
         [Fact]
@@ -279,46 +354,24 @@ namespace VersioningRunner.Tests
         }
 
         // ------------------------------------------------------------------
-        // Malformed input fails to parse rather than capturing something wrong
+        // Closed generics. The class the earlier message-based route silently lost.
         // ------------------------------------------------------------------
 
-        [Theory]
-        [InlineData("Object BH.oM.Acoustic.Panel declared in \"Acoustic_oM")]
-        [InlineData("Object declared in \"Acoustic_oM\"")]
-        [InlineData("BH.oM.Acoustic.Panel declared in \"Acoustic_oM\"")]
-        [InlineData("Object BH.oM.Acoustic.Panel declared in \"\"")]
-        [InlineData("")]
-        public void AMalformedObjectEventYieldsNothing(string message)
-        {
-            var (type, assembly) = RunCommand.ParseObjectEventAssembly(message);
-
-            Assert.Null(type);
-            Assert.Null(assembly);
-        }
-
-        // ------------------------------------------------------------------
-        // Closed generics. The class the first version of this contract silently lost.
-        // ------------------------------------------------------------------
-
+        // 23 of the 9.2 dataset's 1,713 records are closed generics, whose names carry commas
+        // and brackets. Reaching them through a formatted message lost all 23 to the delimiter,
+        // with no diagnostic, and one of them was attributed to the wrong repository as a
+        // result. A dictionary key has no delimiter to lose them to, and the description arrives
+        // as the record wrote it. DatasetProvenanceTests pins the same property at map level.
         [Fact]
-        public void AClosedGenericTypeNameParses()
+        public void AClosedGenericIsAWholeKey()
         {
-            var (type, assembly) = RunCommand.ParseObjectEventAssembly(
-                ObjectEvent(ClosedGeneric, "StructuralEngineering_oM"));
+            var diagnostics = new List<FailureDiagnostic>();
+            RunCommand.ExtractFilteredResult(
+                Tree(ClosedGeneric),
+                (_, _) => (true, AttributionBasis.NotRecorded), null, null, diagnostics,
+                provenance: Map((ClosedGeneric, "StructuralEngineering_oM")));
 
-            Assert.Equal(ClosedGeneric, type);
-            Assert.Equal("StructuralEngineering_oM", assembly);
-        }
-
-        // The commas inside the type argument list are the whole reason the format changed.
-        [Fact]
-        public void TheTypeArgumentListDoesNotTruncateTheAssembly()
-        {
-            var (_, assembly) = RunCommand.ParseObjectEventAssembly(
-                ObjectEvent(ClosedGeneric, "StructuralEngineering_oM"));
-
-            Assert.DoesNotContain(",", assembly);
-            Assert.DoesNotContain("Version=", assembly!);
+            Assert.Equal("StructuralEngineering_oM", Assert.Single(diagnostics).DeclaringAssembly);
         }
 
         // The case that mattered: the type's namespace is the subject's, so the namespace guess
@@ -335,22 +388,11 @@ namespace VersioningRunner.Tests
             Assert.False(withField.Attributable);
             Assert.Equal(AttributionBasis.DeclaringAssembly, withField.Basis);
 
-            // What the fallback does when the field cannot be read, which is what the earlier
-            // comma-delimited format produced for this record.
+            // What the fallback does when the dataset does not answer for the record, which is
+            // every object record until the backfill lands.
             var withoutField = RunCommand.AttributeToSubject(ClosedGeneric, null, subjectNs, closure);
             Assert.True(withoutField.Attributable);
             Assert.Equal(AttributionBasis.NamespaceFallback, withoutField.Basis);
-        }
-
-        [Fact]
-        public void AClosedGenericReachesTheDiagnosticEndToEnd()
-        {
-            var diagnostics = new List<FailureDiagnostic>();
-            RunCommand.ExtractFilteredResult(
-                Tree(ClosedGeneric, ObjectEvent(ClosedGeneric, "StructuralEngineering_oM")),
-                (_, _) => (true, AttributionBasis.NotRecorded), null, null, diagnostics);
-
-            Assert.Equal("StructuralEngineering_oM", Assert.Single(diagnostics).DeclaringAssembly);
         }
     }
 }

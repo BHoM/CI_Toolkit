@@ -594,7 +594,11 @@ runs:
         dotnet restore "${{ steps.ver_sln.outputs.path }}"
         dotnet build "${{ steps.ver_sln.outputs.path }}" --no-restore -c ${{ steps.ver_config.outputs.config }} --nologo
 
+    # The path is emitted rather than repeated. The runner reads the same tree to resolve an
+    # object record's declaring assembly, and two literals of one path in one file is how they
+    # drift apart.
     - name: Validate versioning datasets
+      id: datasets
       if: steps.changed.outputs.count != '0'
       shell: pwsh
       run: |
@@ -609,6 +613,7 @@ runs:
           exit 1
         }
         Write-Host "::notice title=Versioning::Found versioning datasets for: $($versions.Name -join ', ')"
+        "root=$path" | Out-File $env:GITHUB_OUTPUT -Append
 
     # Precondition, not a policy choice. Attribution narrows to the namespaces this
     # repository's own assemblies declare; with no assemblies there is nothing to narrow to,
@@ -746,8 +751,14 @@ runs:
         # line, so no annotation is created. Measured on a sandbox validation run:
         # Classification reported real/SignatureResolved=2 while zero finding
         # annotations were produced, against two on a comparable production run.
+        # --datasets is the tree the step above validated. An object record carries its
+        # declaring assembly in the record's own `_asm` field, and this is the only place the
+        # runner can read it: the TestResult tree the test returns does not carry it.
+        # Attribution falls back to the namespace prefix for any record the dataset does not
+        # answer for, so this is inert until the backfill lands.
         & "${{ steps.runner.outputs.runner_exe }}" `
             --assemblies         'C:\ProgramData\BHoM\Assemblies' `
+            --datasets           '${{ steps.datasets.outputs.root }}' `
             --subject-assembly-list 'subject-assemblies.txt' `
             --configuration      'Release' `
             $(if ('${{ steps.vercond.outputs.file }}') { '--version-conditional', '${{ steps.vercond.outputs.file }}' }) `
@@ -883,6 +894,10 @@ runs:
           $md += "| Dataset versions | $(if ($coverage.DatasetVersions -eq 0) { 'all staged' } else { 'previous only' }) |"
           $md += "| Assemblies loaded | $($coverage.LoadedAssemblies) |"
           $md += "| FromJsonDatasets entry points invoked | $($coverage.VerifyEntryPoints) |"
+          # Zero means every object record was attributed by namespace prefix, which is the
+          # state until the dataset backfill lands. Printed either way, for the same reason the
+          # two rows above it are.
+          $md += "| Dataset types carrying a declaring assembly | $($coverage.TypesWithDeclaringAssembly) |"
         }
         $md += "| Build configuration | ``$(if ($configuration) { $configuration } else { 'not recorded' })`` |"
         $md += ""
