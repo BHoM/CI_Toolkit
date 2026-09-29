@@ -898,6 +898,12 @@ runs:
           # state until the dataset backfill lands. Printed either way, for the same reason the
           # two rows above it are.
           $md += "| Dataset types carrying a declaring assembly | $($coverage.TypesWithDeclaringAssembly) |"
+          # Findings discarded at attribution as another repository's. Printed either way,
+          # because without it a run that filtered everything out and a run that found
+          # nothing wrong produce the same table. It counts leaves dropped at attribution
+          # and is not a diff against a previous run.
+          $dropped = $coverage.DroppedByDeclaringAssembly + $coverage.DroppedByNamespaceFallback
+          $md += "| Dropped as another repository's | $dropped ($($coverage.DroppedByDeclaringAssembly) by declaring assembly, $($coverage.DroppedByNamespaceFallback) by namespace prefix) |"
         }
         $md += "| Build configuration | ``$(if ($configuration) { $configuration } else { 'not recorded' })`` |"
         $md += ""

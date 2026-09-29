@@ -447,6 +447,135 @@ namespace VersioningRunner.Tests
         }
 
         // ------------------------------------------------------------------
+        // Where a candidate list came from.
+        //
+        // The three sources mean different things and only one is about enumeration order,
+        // so the run-level warning splits on this. Recorded rather than derived from Path
+        // plus a null check, because that derivation breaks silently the first time either
+        // of those moves for an unrelated reason.
+        // ------------------------------------------------------------------
+
+        [Fact]
+        public void CandidatesFromAClosureScan_AreNotRecordedAsOrderDependent()
+        {
+            var diagnostics = new List<FailureDiagnostic>();
+            RunCommand.ExtractFilteredResult(
+                Tree("BH.oM.Acoustic.Panel"),
+                (_, _) => (true, AttributionBasis.NotRecorded), null, null, diagnostics,
+                probeTypeCandidates: _ => ["Revit_X_oM_2022", "Revit_X_oM_2023"],
+                provenance: Map(("BH.oM.Acoustic.Panel", "Revit_X_oM_2022")));
+
+            Assert.Equal(CandidateSource.ClosureScan, Assert.Single(diagnostics).CandidatesFrom);
+        }
+
+        [Fact]
+        public void CandidatesFromADatasetDispute_AreRecordedAsSuch()
+        {
+            var diagnostics = new List<FailureDiagnostic>();
+            RunCommand.ExtractFilteredResult(
+                Tree("BH.oM.Structure.Elements.Panel"),
+                (_, _) => (true, AttributionBasis.NotRecorded), null, null, diagnostics,
+                provenance: Disputed("BH.oM.Structure.Elements.Panel", "StructuralEngineering_oM", "Structure_oM"));
+
+            Assert.Equal(CandidateSource.DatasetDispute, Assert.Single(diagnostics).CandidatesFrom);
+        }
+
+        // The pre-existing source, and the only one where enumeration order decides anything.
+        [Fact]
+        public void CandidatesFromTheSignatureProbe_StayRecordedAsOrderDependent()
+        {
+            var diagnostics = new List<FailureDiagnostic>();
+            RunCommand.ExtractFilteredResult(
+                Tree("BH.Revit.Engine.Core.Compute. }", MethodEvent),
+                (_, _) => (true, AttributionBasis.NotRecorded), null,
+                (_, _, _) => (null, ClassificationPath.SignatureResolved, ["One_Engine", "Two_Engine"]),
+                diagnostics);
+
+            Assert.Equal(CandidateSource.SignatureProbe, Assert.Single(diagnostics).CandidatesFrom);
+        }
+
+        [Fact]
+        public void NoCandidates_LeaveTheSourceUnrecorded()
+        {
+            var diagnostics = new List<FailureDiagnostic>();
+            RunCommand.ExtractFilteredResult(
+                Tree("BH.oM.Acoustic.Panel"),
+                (_, _) => (true, AttributionBasis.NotRecorded), null, null, diagnostics,
+                provenance: Map(("BH.oM.Acoustic.Panel", "Acoustic_oM")));
+
+            Assert.Equal(CandidateSource.NotRecorded, Assert.Single(diagnostics).CandidatesFrom);
+        }
+
+        // ------------------------------------------------------------------
+        // Findings dropped at attribution.
+        //
+        // A dropped leaf produces no diagnostic row, so before this it was counted nowhere
+        // and a run that discarded everything read exactly like a run that found nothing.
+        // ------------------------------------------------------------------
+
+        [Fact]
+        public void ADroppedFinding_IsCountedAgainstTheEvidenceThatDroppedIt()
+        {
+            var drops = new AttributionDrops();
+            var diagnostics = new List<FailureDiagnostic>();
+
+            RunCommand.ExtractFilteredResult(
+                Tree("BH.oM.Structure.Elements.Panel"),
+                (_, _) => (false, AttributionBasis.DeclaringAssembly), null, null, diagnostics,
+                provenance: Map(("BH.oM.Structure.Elements.Panel", "Structure_oM")),
+                drops: drops);
+
+            Assert.Empty(diagnostics);
+            Assert.Equal(1, drops.Total);
+            Assert.Equal(1, drops.ByDeclaringAssembly);
+            Assert.Equal(0, drops.ByNamespaceFallback);
+        }
+
+        [Fact]
+        public void ADropOnTheNamespaceGuess_IsCountedSeparately()
+        {
+            var drops = new AttributionDrops();
+
+            RunCommand.ExtractFilteredResult(
+                Tree("BH.oM.Structure.Elements.Panel"),
+                (_, _) => (false, AttributionBasis.NamespaceFallback), null, null, null,
+                drops: drops);
+
+            Assert.Equal(1, drops.ByNamespaceFallback);
+            Assert.Equal(0, drops.ByDeclaringAssembly);
+        }
+
+        // The denominator's other half: a kept finding must not be counted as dropped, or the
+        // two numbers stop summing to the population and neither can be trusted.
+        [Fact]
+        public void AKeptFinding_IsNotCountedAsDropped()
+        {
+            var drops = new AttributionDrops();
+            var diagnostics = new List<FailureDiagnostic>();
+
+            RunCommand.ExtractFilteredResult(
+                Tree("BH.oM.Acoustic.Panel"),
+                (_, _) => (true, AttributionBasis.DeclaringAssembly), null, null, diagnostics,
+                provenance: Map(("BH.oM.Acoustic.Panel", "Acoustic_oM")),
+                drops: drops);
+
+            Assert.Single(diagnostics);
+            Assert.Equal(0, drops.Total);
+        }
+
+        // Every existing caller passes nothing, and must keep working.
+        [Fact]
+        public void NoCounterSupplied_IsNotAnError()
+        {
+            var diagnostics = new List<FailureDiagnostic>();
+            RunCommand.ExtractFilteredResult(
+                Tree("BH.oM.Structure.Elements.Panel"),
+                (_, _) => (false, AttributionBasis.DeclaringAssembly), null, null, diagnostics);
+
+            Assert.Empty(diagnostics);
+        }
+
+        // ------------------------------------------------------------------
         // Closed generics. The class the earlier message-based route silently lost.
         // ------------------------------------------------------------------
 

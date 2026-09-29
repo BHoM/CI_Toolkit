@@ -103,6 +103,53 @@ public enum AttributionBasis
     NamespaceFallback,
 }
 
+// Where a finding's candidate list came from. Recorded explicitly because the three sources
+// mean different things and only one of them is about enumeration order, so a single message
+// over all of them is wrong for two. Derivable today from Path plus a null check on
+// DeclaringAssembly, which is the coupling this exists to avoid: that derivation breaks
+// silently the first time either of those moves for an unrelated reason.
+public enum CandidateSource
+{
+    // No candidate list, or one recorded before this was tracked.
+    NotRecorded,
+    // Method record. More than one loaded assembly matched the signature probe, so which one
+    // was recorded genuinely depended on the order the closure was enumerated in.
+    SignatureProbe,
+    // Object record. The dataset named the declaring assembly and settled it; the closure was
+    // then scanned to report how many other loaded assemblies also declare the type. The scan
+    // did not decide anything, so enumeration order did not either.
+    ClosureScan,
+    // Object record. Dataset versions named different assembly families for the type, so
+    // nothing was attributed and the finding fell back to the namespace prefix.
+    DatasetDispute,
+}
+
+// Findings dropped at attribution, which produce no diagnostic row and were previously
+// counted nowhere. Without this a run reporting zero findings because nothing failed and one
+// reporting zero because attribution discarded everything are the same output.
+//
+// Counts leaves dropped at attribution. NOT a diff against a previous run: it does not say
+// how many findings an earlier configuration would have reported, and must not be read that
+// way even when the two coincide.
+public sealed class AttributionDrops
+{
+    public int ByDeclaringAssembly { get; private set; }
+    public int ByNamespaceFallback { get; private set; }
+    public int ByUnrecordedBasis { get; private set; }
+
+    public int Total => ByDeclaringAssembly + ByNamespaceFallback + ByUnrecordedBasis;
+
+    public void Count(AttributionBasis basis)
+    {
+        switch (basis)
+        {
+            case AttributionBasis.DeclaringAssembly: ByDeclaringAssembly++; break;
+            case AttributionBasis.NamespaceFallback: ByNamespaceFallback++; break;
+            default: ByUnrecordedBasis++; break;
+        }
+    }
+}
+
 // What this run actually built, needed to tell "the recorded declaring
 // assembly is missing because it is someone else's" from "because we did not compile that
 // configuration" from "because it was genuinely removed". Passed explicitly rather than
@@ -138,8 +185,8 @@ public record FailureDiagnostic(
     string? DeclaringType,
     string? DeclaringAssembly,
     int EventCount,
-    // Every assembly in the loaded set that yielded the declaring type. More than one
-    // means the classification depended on enumeration order (see CI_Toolkit#161).
+    // Every assembly that claimed the declaring type. What more than one means depends on
+    // where the list came from, which is why CandidatesFrom is recorded beside it.
     IReadOnlyList<string>? DeclaringTypeCandidates = null,
     // Build configuration this run compiled, carried per row so a finding read on its
     // own is interpretable. Human-legible; it does not by itself explain a divergence.
@@ -147,7 +194,10 @@ public record FailureDiagnostic(
     VersionConditionalState VersionConditional = VersionConditionalState.Unknown,
     // Which evidence attributed this failure to the subject. Per row rather than only as a
     // total, so a reader can tell whether any individual finding rests on the ambiguous path.
-    AttributionBasis AttributedBy = AttributionBasis.NotRecorded);
+    AttributionBasis AttributedBy = AttributionBasis.NotRecorded,
+    // Where DeclaringTypeCandidates came from. Only SignatureProbe means the answer depended
+    // on enumeration order.
+    CandidateSource CandidatesFrom = CandidateSource.NotRecorded);
 
 // Coverage denominator. A verdict without one cannot be interpreted: a pass over zero
 // methods reads identically to a pass over seven thousand. BHoMBot reported object
@@ -170,7 +220,13 @@ public record CoverageCounts(
     // record was attributed by namespace prefix, which is the pre-backfill state and reads
     // identically in the artefact to a run that never found the dataset at all. The log says
     // which, for 90 days; this is the part that outlives it.
-    int TypesWithDeclaringAssembly = 0);
+    int TypesWithDeclaringAssembly = 0,
+    // Findings discarded at attribution as another repository's, split by the evidence that
+    // discarded them. Present for the same reason as RecordsUnverified: without it, a run
+    // that filtered everything out and a run that found nothing wrong are the same output.
+    // These count leaves dropped at attribution and are not a diff against a previous run.
+    int DroppedByDeclaringAssembly = 0,
+    int DroppedByNamespaceFallback = 0);
 
 public class VersioningResult
 {

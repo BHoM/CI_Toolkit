@@ -156,6 +156,7 @@ public static class RunCommand
             (typeFullName, methodName, declaringAssembly) =>
                 ProbeDeclaringType(loaded, typeFullName, methodName, declaringAssembly);
         Func<string, IReadOnlyList<string>> probeTypeCandidates = t => ProbeTypeCandidates(loaded, t);
+        var drops = new AttributionDrops();
         foreach (var method in methods)
         {
             object? rawResult;
@@ -182,7 +183,7 @@ public static class RunCommand
                 return 1;
             }
 
-            var partial = ExtractFilteredResult(rawResult, isAttributable, unresolvableSkips, probeSignature, diagnostics, closure, typeIndex, probeTypeCandidates, provenance);
+            var partial = ExtractFilteredResult(rawResult, isAttributable, unresolvableSkips, probeSignature, diagnostics, closure, typeIndex, probeTypeCandidates, provenance, drops);
             allFailures.AddRange(partial.Failures);
         }
 
@@ -302,7 +303,9 @@ public static class RunCommand
             SubjectTypes: s_subjectTypeCount,
             DatasetVersions: testAll ? 0 : 1,
             RecordsUnverified: unresolvableSkips.Count,
-            TypesWithDeclaringAssembly: provenance.TypesMapped);
+            TypesWithDeclaringAssembly: provenance.TypesMapped,
+            DroppedByDeclaringAssembly: drops.ByDeclaringAssembly,
+            DroppedByNamespaceFallback: drops.ByNamespaceFallback);
 
         var result = new VersioningResult
         {
@@ -330,6 +333,29 @@ public static class RunCommand
             $"{coverage.LoadedAssemblies} assembl(ies) loaded; " +
             $"{coverage.VerifyEntryPoints} FromJsonDatasets entry point(s) invoked; " +
             $"{coverage.RecordsUnverified} record(s) attributed but not verified");
+
+        // Printed in every state, zero included. This is the only account of findings that
+        // left the run without producing a row, so a run that filtered everything out and a
+        // run that found nothing wrong are otherwise the same output.
+        //
+        // Counts leaves dropped at attribution. It is NOT a diff against a previous run and
+        // must not be read as one: it does not say how many findings some earlier
+        // configuration would have reported, even where the two happen to coincide.
+        Console.WriteLine(
+            $"Attribution: {result.FailureCount + unresolvableSkips.Count} finding(s) kept, " +
+            $"{drops.Total} dropped as another repository's " +
+            $"({drops.ByDeclaringAssembly} by declaring assembly, " +
+            $"{drops.ByNamespaceFallback} by namespace prefix).");
+
+        // A green that rests entirely on having discarded everything is a different statement
+        // from a green that examined findings and found them sound, and the exit code cannot
+        // tell them apart.
+        if (drops.Total > 0 && result.FailureCount == 0 && unresolvableSkips.Count == 0)
+            Console.Error.WriteLine(
+                $"::warning title=Versioning::Every one of the {drops.Total} finding(s) in this run was " +
+                "attributed to another repository, so this result rests on attribution being right rather " +
+                "than on nothing having failed.");
+
         if (configuration is not null)
             Console.WriteLine($"Configuration: {configuration}");
 
@@ -337,11 +363,36 @@ public static class RunCommand
         // result.Failures. Counting every diagnostic made the total disagree with the detail as
         // soon as a finding could be reclassified to unverified: the warning claimed N ambiguous
         // findings while fewer than N were listed.
-        int ambiguous = diagnostics.Count(d => d.CountedAsReal && d.DeclaringTypeCandidates is { Count: > 1 });
-        if (ambiguous > 0)
+        //
+        // Split by source. A single message over all three was wrong for two of them: only the
+        // signature probe lets enumeration order decide the answer. The closure scan reports how
+        // many assemblies also declare a type the dataset had already settled, and a dataset
+        // dispute means nothing was attributed at all. Telling someone load order explained a
+        // finding it had no part in sends them to the wrong place.
+        var ambiguousReal = diagnostics
+            .Where(d => d.CountedAsReal && d.DeclaringTypeCandidates is { Count: > 1 })
+            .ToList();
+
+        int orderDependent = ambiguousReal.Count(d => d.CandidatesFrom == CandidateSource.SignatureProbe);
+        if (orderDependent > 0)
             Console.Error.WriteLine(
-                $"::warning title=Versioning::{ambiguous} finding(s) have a declaring type present in more than one loaded assembly, " +
-                "so their classification depended on assembly enumeration order. See CI_Toolkit#161.");
+                $"::warning title=Versioning::{orderDependent} finding(s) were attributed by probing the loaded " +
+                "assemblies for the declaring type, and more than one matched, so which assembly was recorded " +
+                "depended on the order the closure was enumerated in.");
+
+        int alsoDeclared = ambiguousReal.Count(d => d.CandidatesFrom == CandidateSource.ClosureScan);
+        if (alsoDeclared > 0)
+            Console.Error.WriteLine(
+                $"::warning title=Versioning::{alsoDeclared} finding(s) name a type that more than one loaded " +
+                "assembly declares. The dataset named the declaring assembly and settled each one, so this is " +
+                "reported for visibility rather than because the answer was in doubt.");
+
+        int disputed = ambiguousReal.Count(d => d.CandidatesFrom == CandidateSource.DatasetDispute);
+        if (disputed > 0)
+            Console.Error.WriteLine(
+                $"::warning title=Versioning::{disputed} finding(s) name a type whose declaring assembly the " +
+                "dataset versions disagree about, so none was attributed and each fell back to the namespace " +
+                "prefix.");
 
         const int maxLogged = 50;
         foreach (var failure in result.Failures.Take(maxLogged))
@@ -355,7 +406,19 @@ public static class RunCommand
             if (d?.VersionConditional == VersionConditionalState.Yes)
                 context.Add($"Signature is version-conditional. Built as {d.Configuration ?? "an unrecorded configuration"}.");
             if (d?.DeclaringTypeCandidates is { Count: > 1 } cands)
-                context.Add($"Declaring type present in {cands.Count} loaded assemblies ({string.Join(", ", cands.Take(3))}), so classification depended on enumeration order.");
+            {
+                string joined = string.Join(", ", cands.Take(3));
+                context.Add(d.CandidatesFrom switch
+                {
+                    CandidateSource.SignatureProbe =>
+                        $"Declaring type present in {cands.Count} loaded assemblies ({joined}), so classification depended on enumeration order.",
+                    CandidateSource.ClosureScan =>
+                        $"Declaring assembly came from the dataset ({d.DeclaringAssembly}). {cands.Count} loaded assemblies also declare this type ({joined}); the dataset settled it, not enumeration order.",
+                    CandidateSource.DatasetDispute =>
+                        $"Dataset versions disagree about the declaring assembly ({joined}), so this finding was not attributed and fell back to the namespace prefix.",
+                    _ => $"Declaring type present in {cands.Count} loaded assemblies ({joined}).",
+                });
+            }
 
             string suffix = context.Count > 0 ? " " + string.Join(" ", context) : string.Empty;
             Console.Error.WriteLine($"::error title=Versioning::{failure.Description}: {failure.Message}{suffix}");
@@ -434,9 +497,9 @@ public static class RunCommand
     // ProbeDeclaringType walks the loaded list and takes its verdict from the FIRST
     // assembly that yields the declaring type. Where two repos declare the same type,
     // whichever is enumerated first decides whether the finding reads as a genuine
-    // regression or as an infrastructure problem. That is CI_Toolkit#161's mechanism:
-    // BH.Revit.Engine.Core.Compute is defined by both Revit_Core_Engine and
-    // Revit_ModelQA_Engine, and 42 such type-level collisions exist across the fleet.
+    // regression or as an infrastructure problem. BH.Revit.Engine.Core.Compute is declared
+    // by Revit_Core_Engine and by one other assembly, and 42 such type-level collisions
+    // exist across the fleet.
     //
     // Directory.GetFiles documents no ordering. Measured on windows-2025-vs2026 across
     // four cold-rebuild runs on separate runners, NTFS returned exactly
@@ -532,7 +595,10 @@ public static class RunCommand
         Func<string, IReadOnlyList<string>>? probeTypeCandidates = null,
         // The dataset's answer for an object record's declaring assembly. Empty by default, so
         // a caller that supplies nothing keeps the namespace fallback it had before.
-        DeclaringAssemblyMap? provenance = null)
+        DeclaringAssemblyMap? provenance = null,
+        // Counts findings discarded at attribution. Optional so every existing caller is
+        // unchanged; when absent the drops are simply not counted, as before.
+        AttributionDrops? drops = null)
     {
         if (rawResult is null)
             return new VersioningResult
@@ -543,7 +609,7 @@ public static class RunCommand
             };
 
         var failures = new List<FailureInfo>();
-        CollectLeafFailures(rawResult, isAttributable, failures, unresolvableSkips, probeSignature, diagnostics, closure, typeIndex ?? LoadedTypeIndex.Empty, probeTypeCandidates, provenance ?? DeclaringAssemblyMap.Empty, depth: 0);
+        CollectLeafFailures(rawResult, isAttributable, failures, unresolvableSkips, probeSignature, diagnostics, closure, typeIndex ?? LoadedTypeIndex.Empty, probeTypeCandidates, provenance ?? DeclaringAssemblyMap.Empty, drops, depth: 0);
 
         var status = failures.Count > 0 ? VersioningStatus.Error : VersioningStatus.Pass;
         return new VersioningResult
@@ -562,7 +628,7 @@ public static class RunCommand
         Func<string, string, string?, (string? Cause, ClassificationPath Path, IReadOnlyList<string> Candidates)>? probeSignature,
         List<FailureDiagnostic>? diagnostics, ClosureContext? closure,
         LoadedTypeIndex typeIndex, Func<string, IReadOnlyList<string>>? probeTypeCandidates,
-        DeclaringAssemblyMap provenance, int depth)
+        DeclaringAssemblyMap provenance, AttributionDrops? drops, int depth)
     {
         // BHoM's TestResult tree has at most 3 levels under the root (outer → per-version
         // summary → individual type result). Depth 5 gives headroom for unexpected nesting
@@ -648,7 +714,13 @@ public static class RunCommand
 
             var (attributable, attributedBy) = isAttributable(desc, declaringAssembly);
             if (!attributable)
+            {
+                // Counted before returning. This is the only place a finding leaves the run
+                // without producing a row, so without the count a filtered-out run and a
+                // clean run are indistinguishable in every output.
+                drops?.Count(attributedBy);
                 return;
+            }
 
             // DescriptionFromJson mangles many method entries to "<DeclaringType>. }",
             // losing the method name. The Method event still carries both, so prefer it.
@@ -666,6 +738,7 @@ public static class RunCommand
                 ? ClassificationPath.UnresolvableTypeAbsent
                 : ClassificationPath.UnresolvableFromEvents;
             IReadOnlyList<string> candidates = Array.Empty<string>();
+            var candidatesFrom = CandidateSource.NotRecorded;
 
             // No type-level cause recorded means the blocker may be in the signature
             // rather than the payload, which only reflection over the method can tell.
@@ -692,12 +765,21 @@ public static class RunCommand
                     // tellable apart; measured 0 across the 1711 type names the two backfilled
                     // versions share.
                     if (disputedAssemblies is not null)
+                    {
                         candidates = disputedAssemblies;
+                        candidatesFrom = CandidateSource.DatasetDispute;
+                    }
                     else if (probeTypeCandidates is not null && provenanceType is not null)
+                    {
                         candidates = probeTypeCandidates(provenanceType);
+                        candidatesFrom = CandidateSource.ClosureScan;
+                    }
                 }
                 else if (probeSignature is not null)
+                {
                     (cause, path, candidates) = probeSignature(eventType, eventMethod, declaringAssembly);
+                    candidatesFrom = CandidateSource.SignatureProbe;
+                }
                 else
                     path = ClassificationPath.ProbeNotSupplied;
             }
@@ -792,7 +874,8 @@ public static class RunCommand
                 DeclaringTypeCandidates: candidates.Count > 1 ? candidates : null,
                 Configuration: s_configuration,
                 VersionConditional: ClassifyVersionConditional(eventType, eventMethod),
-                AttributedBy: attributedBy));
+                AttributedBy: attributedBy,
+                CandidatesFrom: candidatesFrom));
         }
         else
         {
@@ -800,7 +883,7 @@ public static class RunCommand
             {
                 string childStatus = child.GetType().GetProperty("Status")?.GetValue(child)?.ToString() ?? "Pass";
                 if (childStatus is "Error" or "Warning")
-                    CollectLeafFailures(child, isAttributable, failures, unresolvableSkips, probeSignature, diagnostics, closure, typeIndex, probeTypeCandidates, provenance, depth + 1);
+                    CollectLeafFailures(child, isAttributable, failures, unresolvableSkips, probeSignature, diagnostics, closure, typeIndex, probeTypeCandidates, provenance, drops, depth + 1);
             }
         }
     }
@@ -1229,7 +1312,7 @@ public static class RunCommand
     //
     // The loop used to return on the first match, which made the classification depend on
     // assembly enumeration order wherever two repos declare into the same namespace
-    // (CI_Toolkit#161, measured on BH.Revit.Engine.Core). The probe result still comes from
+    // (measured on BH.Revit.Engine.Core). The probe result still comes from
     // the first match, so behaviour is unchanged; the candidate list is recorded so a
     // classification that could have gone either way is visible rather than silent.
     internal static (string? Cause, ClassificationPath Path, IReadOnlyList<string> Candidates) ProbeDeclaringType(
