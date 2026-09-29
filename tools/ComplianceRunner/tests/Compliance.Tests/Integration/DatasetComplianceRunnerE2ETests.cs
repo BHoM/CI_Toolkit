@@ -49,6 +49,40 @@ public class DatasetComplianceRunnerE2ETests
         Assert.That(exitCode, Is.EqualTo(0));
     }
 
+    [Test]
+    [Description("A versioning upgrade map under a *_Datasets project directory is filtered before BHoM is called, and counts as not relevant rather than as an examined file.")]
+    public void VersioningUpgradeMap_UnderADatasetsDirectory_IsNotExamined()
+    {
+        // The shape that fails today: the file name is the only signal, and the "datasets"
+        // substring comes from the project directory rather than from a data directory.
+        var (exitCode, stdout) = RunnerFixture.Run("DatasetComplianceRunner",
+            "--output", "json", "BHoM_Datasets/Versioning_93.json");
+
+        var root = JsonDocument.Parse(stdout).RootElement;
+        Assert.Multiple(() =>
+        {
+            Assert.That(exitCode, Is.EqualTo(0));
+            Assert.That(root.GetProperty("status").GetString(),         Is.EqualTo("Pass"));
+            Assert.That(root.GetProperty("annotationCount").GetInt32(), Is.EqualTo(0));
+        });
+    }
+
+    [Test]
+    [Description("The digit gate holds end to end: Versioning_Rules.json is still selected, so it reaches the BHoM call and is reported as missing on disk rather than filtered.")]
+    public void VersioningRulesJson_IsStillInScope()
+    {
+        // Distinguishes "filtered out" from "examined": a filtered file never reaches the
+        // File.Exists branch, so the [SKIP] line is what proves this one was not filtered.
+        var (exitCode, stdout) = RunnerFixture.Run("DatasetComplianceRunner",
+            "--output", "json", "BHoM_Datasets/Versioning_Rules.json");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(exitCode, Is.EqualTo(0));
+            Assert.That(stdout, Does.Contain("[SKIP] File not found"));
+        });
+    }
+
     // ── JSON output structure ─────────────────────────────────────────────────
 
     [Test]
