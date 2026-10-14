@@ -46,7 +46,7 @@ public static class AnnotationConvert
         // TrimEnd removes the two trailing newlines that overload adds for PR comment formatting.
         ann.Message = messageIsPreformatted
             ? (info.Message ?? "").TrimEnd()
-            : BH.Engine.Test.Query.IFullMessage(info)?.TrimEnd() ?? "";
+            : BH.Engine.Test.Query.IFullMessage(info, minSeverity: InnerResultFloor(info.Status))?.TrimEnd() ?? "";
 
         if (info is Error error)
         {
@@ -71,6 +71,25 @@ public static class AnnotationConvert
 
         return ann;
     }
+
+    /// <summary>
+    /// Severity floor for the inner results rendered into a finding's message.
+    /// </summary>
+    /// <remarks>
+    /// FullMessage uses one floor for two things: it blanks the finding's own message when the
+    /// finding is less severe than the floor, and it drops inner results below it. So the floor
+    /// cannot simply be raised to Warning for everything, because that would empty a Pass-level
+    /// notice, which DatasetCompliance uses to surface dataset provenance. Holding the floor at
+    /// Pass for a Pass and at Warning otherwise drops passing inner results while leaving
+    /// warnings and errors intact, matching the filter DatasetTestRunner already applies to its
+    /// own top level.
+    ///
+    /// Without this, a dataset-test result carrying one inner result per TestData renders every
+    /// passing entry. Measured on a 501-entry fixture: 40,103 characters, against a downstream
+    /// cut at roughly 4,100 that discarded the failing entry entirely.
+    /// </remarks>
+    private static TestStatus InnerResultFloor(TestStatus status) =>
+        status == TestStatus.Pass ? TestStatus.Pass : TestStatus.Warning;
 
     /// <summary>Verbose console dump of all fields on a compliance finding.</summary>
     public static void LogDetailedFinding(ITestInformation info)
