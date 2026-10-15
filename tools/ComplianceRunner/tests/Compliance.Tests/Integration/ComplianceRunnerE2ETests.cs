@@ -115,4 +115,64 @@ public class ComplianceRunnerE2ETests
                 "the one annotation a passing run may produce is the report that it examined nothing");
         });
     }
+
+    // ── A file the engine throws on ───────────────────────────────────────────
+
+    /// <summary>
+    /// Writes a .cs file the compliance engine cannot analyse, under a directory name the code
+    /// rules' path gate accepts, and returns its full path along with the directory to clean up.
+    ///
+    /// The content is malformed C#. Parsed, it leaves a parameter with no identifier, and the
+    /// first rule to index into a parameter name throws. Note it carries no preprocessor
+    /// directive: a directive is one way to reach this state and not the only one, so the test
+    /// does not depend on how the file got here.
+    /// </summary>
+    private static (string File, string Dir) WriteUnanalysableFile()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "bhom-ci-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(dir, "Probe_Adapter"));
+        string file = Path.Combine(dir, "Probe_Adapter", "ProbeAdapter.cs");
+        File.WriteAllText(file,
+            "namespace BH.Adapter.Probe\n" +
+            "                m_value = new FileInfo(filePath).Directory.FullName;\n");
+        return (file, dir);
+    }
+
+    [Test]
+    [Category("RequiresBHoM")]
+    [Description("A file the engine throws on fails the run, names itself, and does not stop the other files being reported.")]
+    public void UnanalysableFile_FailsTheRunAndIsNamed_WithoutLosingOtherFindings()
+    {
+        var (bad, dir) = WriteUnanalysableFile();
+
+        // A second file with a real violation, so the test can tell "the run continued" from
+        // "the run died quietly". Capital parameter name breaks InputParameterStartsLower.
+        string good = Path.Combine(dir, "Probe_Adapter", "ProbeHelper.cs");
+        File.WriteAllText(good,
+            "namespace BH.Adapter.Probe\n{\n    public static class ProbeHelper\n    {\n" +
+            "        public static int ProbeHelperMethod(int BadParam) { return BadParam; }\n" +
+            "    }\n}\n");
+
+        try
+        {
+            var (exitCode, stdout) = RunnerFixture.Run("ComplianceRunner",
+                "code", "--output", "github", bad, good);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(exitCode, Is.EqualTo(1), "a file the engine could not analyse must fail the run");
+                Assert.That(stdout, Does.Contain("ProbeAdapter.cs"),
+                    "the failing file must be named, or the author cannot act on the red");
+                Assert.That(stdout, Does.Contain("could not be analysed"));
+                Assert.That(stdout, Does.Contain("1 of 2 file(s) examined"),
+                    "the coverage line must survive, which it cannot if the process died");
+                Assert.That(stdout, Does.Contain("InputParameterStartsLower"),
+                    "the other file's findings must still be reported; losing them was the defect");
+            });
+        }
+        finally
+        {
+            try { Directory.Delete(dir, recursive: true); } catch { /* temp dir, best effort */ }
+        }
+    }
 }
