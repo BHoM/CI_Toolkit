@@ -72,10 +72,10 @@ class ComplianceRunner
                         resultForThisFile = BH.Engine.Test.CodeCompliance.Compute.CheckAssemblyInfo(file, orgUrl);
 
                     // Remap absolute location paths back to the relative file path so
-                    // annotations point to the correct diff line — mirrors BHoMBot ProjectCompliance.cs.
+                    // annotations point to the correct diff line, mirroring BHoMBot ProjectCompliance.cs.
                     // Note: .OfType<Error>() silently drops any ITestInformation that is not exactly
-                    // BH.oM.Test.CodeCompliance.Error. Currently safe — the project engine only emits
-                    // Error-typed findings — but revisit if new finding sub-types are introduced.
+                    // BH.oM.Test.CodeCompliance.Error. Currently safe, because the project engine only emits
+                    // Error-typed findings, but revisit if new finding sub-types are introduced.
                     if (resultForThisFile?.Information != null)
                     {
                         resultForThisFile.Information = resultForThisFile.Information
