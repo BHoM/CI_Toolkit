@@ -175,4 +175,35 @@ public class ComplianceRunnerE2ETests
             try { Directory.Delete(dir, recursive: true); } catch { /* temp dir, best effort */ }
         }
     }
+
+    [Test]
+    [Category("RequiresBHoM")]
+    [Description("A run whose only file could not be analysed still fails, on the failure alone.")]
+    public void UnanalysableFileAlone_StillFailsTheRun()
+    {
+        // Separate from the test above because that one cannot see this. Its second file carries
+        // a real violation, so the run exits 1 on the merged Error whether or not failures count
+        // towards the exit code. A mutation removing the failure term from the exit code
+        // survived it. With nothing else in the run there is no other reason to be red, so the
+        // exit code here rests on the failure count and nothing else.
+        var (bad, dir) = WriteUnanalysableFile();
+        try
+        {
+            var (exitCode, stdout) = RunnerFixture.Run("ComplianceRunner",
+                "code", "--output", "github", bad);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(exitCode, Is.EqualTo(1),
+                    "a run that could analyse nothing must not report success");
+                Assert.That(stdout, Does.Contain("0 of 1 file(s) examined"));
+                Assert.That(stdout, Does.Not.Contain("reports success without having inspected anything"),
+                    "that warning is for a green that examined nothing, and this run is red");
+            });
+        }
+        finally
+        {
+            try { Directory.Delete(dir, recursive: true); } catch { /* temp dir, best effort */ }
+        }
+    }
 }
