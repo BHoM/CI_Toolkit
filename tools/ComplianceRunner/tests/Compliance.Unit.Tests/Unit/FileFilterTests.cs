@@ -34,7 +34,7 @@ public class FileFilterTests
         [TestCase("a/DATASETS/foo.json",      ExpectedResult = true)]  // case-insensitive
         [TestCase(@"a\datasets\foo.json",     ExpectedResult = true)]  // backslash separators
         [TestCase("a/datasets/foo.JSON",      ExpectedResult = true)]  // extension case-insensitive
-        [TestCase("a/notdatasets/foo.json",   ExpectedResult = true)]  // bare substring match — mirrors BHoMBot
+        [TestCase("a/notdatasets/foo.json",   ExpectedResult = false)] // INVERTED: a partial directory name no longer matches
         [TestCase("a/datasets/foo.cs",        ExpectedResult = false)] // wrong extension
         [TestCase("foo.json",                 ExpectedResult = false)] // no "datasets" substring
         [TestCase("datasets/foo.json",        ExpectedResult = true)]  // root-level
@@ -53,10 +53,12 @@ public class FileFilterTests
         [TestCase("BHoM_Datasets/Versioning_93.JSON",        ExpectedResult = false)] // extension case-insensitive
 
         // The digit gate. A hand-authored dataset starting with the same word stays in scope,
-        // which is the whole reason the rule is not a bare Versioning_* match.
+        // which is the whole reason the rule is not a bare Versioning_* match. Moved off
+        // BHoM_Datasets/ when the anchoring landed: under a project directory these would
+        // return false for the wrong reason and stop testing the digit gate at all.
         [TestCase("Datasets/Versioning_Rules.json",          ExpectedResult = true)]
-        [TestCase("BHoM_Datasets/Versioning_.json",          ExpectedResult = true)]
-        [TestCase("BHoM_Datasets/Versioning.json",           ExpectedResult = true)]
+        [TestCase("Datasets/Versioning_.json",               ExpectedResult = true)]
+        [TestCase("Datasets/Versioning.json",                ExpectedResult = true)]
 
         // Anchored on the file name, so a directory named for a version does not take the real
         // datasets under it out of scope.
@@ -71,6 +73,29 @@ public class FileFilterTests
         // relaxed prefix match still passes every realistic fixture above, because reading a
         // fixed index lands inside the prefix whenever the prefix is not at the start.
         [TestCase("Datasets/012345678901Versioning_5.json",  ExpectedResult = true)]
+
+        // The anchoring. A project directory named *_Datasets supplies the substring and holds
+        // code, not datasets; both dataset repositories carry one beside the real Datasets
+        // directory. These are the #43 cases stated without relying on the upgrade-map rule,
+        // so a failure here says the anchoring moved rather than the name test.
+        [TestCase("BuroHappold_Datasets/Rules.json",         ExpectedResult = false)]
+        [TestCase("BHoM_Datasets/Anything.json",             ExpectedResult = false)]
+        [TestCase(@"BHoM_Datasets\Anything.json",            ExpectedResult = false)] // backslash separators
+        [TestCase("mydatasets/foo.json",                     ExpectedResult = false)]
+        [TestCase("datasets_old/foo.json",                   ExpectedResult = false)]
+        [TestCase("a/b/Datasets_Archive/foo.json",           ExpectedResult = false)]
+
+        // The real layout both dataset repositories use, which must keep working.
+        [TestCase("Datasets/BuildingEnvironments/Acoustics/x.json", ExpectedResult = true)]
+        [TestCase("Structure/Datasets/Sections/foo.json",    ExpectedResult = true)]  // nested
+        [TestCase(@"Structure\Datasets\Sections\foo.json",   ExpectedResult = true)]  // backslash, nested
+
+        // A file called datasets.json is decided by its directory, not its name. These pass
+        // whether the scan covers the file name or not, since a final segment equal to
+        // "datasets" cannot also end ".json". They record the intent; they do not pin it.
+        [TestCase("config/datasets.json",                    ExpectedResult = false)]
+        [TestCase("Datasets/datasets.json",                  ExpectedResult = true)]  // directory still decides
+        [TestCase("datasets",                                ExpectedResult = false)] // not .json
         public bool IsDatasetFile(string file)
             => FileFilter.IsDatasetFile(file);
 

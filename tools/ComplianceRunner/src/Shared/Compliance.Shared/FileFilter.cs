@@ -29,23 +29,64 @@ public static class FileFilter
     }
 
     /// <summary>
-    /// Returns true for .json files whose path contains "datasets" (case-insensitive),
-    /// except versioning upgrade maps, which are never Dataset documents.
+    /// Returns true for .json files sitting inside a directory called "datasets"
+    /// (case-insensitive), except versioning upgrade maps, which are never Dataset documents.
     /// </summary>
     /// <remarks>
-    /// The path test is BHoMBot's DatasetCompliance filter,
-    /// <c>x.ToLower().Contains("datasets") &amp;&amp; x.EndsWith(".json")</c>. The upgrade-map
-    /// exclusion is a deliberate divergence from it, so the two no longer agree.
+    /// The directory test is anchored on a whole path segment. It used to ask whether the
+    /// lowercased path contained "datasets" anywhere, which is BHoMBot's DatasetCompliance
+    /// filter, <c>x.ToLower().Contains("datasets") &amp;&amp; x.EndsWith(".json")</c>. That
+    /// selects a file because of a project directory named *_Datasets, which holds code rather
+    /// than datasets: both dataset repositories carry one beside the real Datasets directory,
+    /// and the only file ever placed in one failed the check for a reason nobody could act on.
+    ///
+    /// This now diverges from BHoMBot on two counts rather than one, the anchoring and the
+    /// upgrade-map exclusion, and the two no longer agree by design.
+    ///
+    /// The change is preventive rather than a change of scope: every file the substring form
+    /// selects already sits under a real Datasets directory, so nothing leaves scope. A path
+    /// the two forms disagree about is a signal worth reading, not a regression.
     /// </remarks>
     public static bool IsDatasetFile(string file)
     {
         if (!file.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
             return false;
 
-        if (!file.Contains("datasets", StringComparison.OrdinalIgnoreCase))
+        if (!IsUnderDatasetsDirectory(file))
             return false;
 
         return !IsVersioningUpgradeMap(file);
+    }
+
+    /// <summary>
+    /// True when one of the file's parent directories is called "datasets", case-insensitive.
+    /// </summary>
+    /// <remarks>
+    /// Only the directory portion is scanned, because the rule expresses "inside a directory
+    /// called Datasets". Note this is a statement of intent rather than a behavioural
+    /// constraint: scanning the whole path would give the same answers, since a final segment
+    /// equal to "datasets" cannot also end ".json". No test can tell the two apart, so do not
+    /// write one expecting it to.
+    ///
+    /// Both separators are handled, because paths arrive from git with '/' and from a caller on
+    /// Windows with '\'. A segment comparison is more sensitive to this than the substring test
+    /// it replaces, which did not care.
+    /// </remarks>
+    private static bool IsUnderDatasetsDirectory(string file)
+    {
+        var normalized = file.Replace("\\", "/");
+
+        int lastSlash = normalized.LastIndexOf('/');
+        if (lastSlash < 0)
+            return false;
+
+        foreach (var segment in normalized.Substring(0, lastSlash).Split('/'))
+        {
+            if (segment.Equals("datasets", StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
     }
 
     /// <summary>

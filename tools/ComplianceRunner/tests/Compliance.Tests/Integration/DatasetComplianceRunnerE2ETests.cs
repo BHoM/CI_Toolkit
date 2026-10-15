@@ -24,10 +24,10 @@ public class DatasetComplianceRunnerE2ETests
     // ── File filtering — no BHoM call made ────────────────────────────────────
 
     [Test]
-    [Description(".json files whose path does not contain 'datasets' (case-insensitive) are filtered before BHoM is called.")]
+    [Description(".json files that do not sit inside a directory called 'datasets' (case-insensitive) are filtered before BHoM is called.")]
     public void NonDatasetJsonFile_JsonOutput_ExitsWithCode0AndPassStatus()
     {
-        // "notadataset" does not contain the substring "datasets" — filtered out by IsDatasetFile.
+        // No segment of this path equals "datasets", so IsDatasetFile filters it out.
         var (exitCode, stdout) = RunnerFixture.Run("DatasetComplianceRunner",
             "--output", "json", "notadataset/foo.json");
 
@@ -50,13 +50,14 @@ public class DatasetComplianceRunnerE2ETests
     }
 
     [Test]
-    [Description("A versioning upgrade map under a *_Datasets project directory is filtered before BHoM is called, and counts as not relevant rather than as an examined file.")]
+    [Description("A versioning upgrade map inside a real Datasets directory is filtered before BHoM is called, and counts as not relevant rather than as an examined file.")]
     public void VersioningUpgradeMap_UnderADatasetsDirectory_IsNotExamined()
     {
-        // The shape that fails today: the file name is the only signal, and the "datasets"
-        // substring comes from the project directory rather than from a data directory.
+        // Inside a real Datasets directory, so the file name is the only thing taking it out of
+        // scope. Under a *_Datasets project directory the anchoring would filter it first and
+        // this would stop testing the upgrade-map rule at all.
         var (exitCode, stdout) = RunnerFixture.Run("DatasetComplianceRunner",
-            "--output", "json", "BHoM_Datasets/Versioning_93.json");
+            "--output", "json", "Datasets/Versioning_93.json");
 
         var root = JsonDocument.Parse(stdout).RootElement;
         Assert.Multiple(() =>
@@ -73,13 +74,33 @@ public class DatasetComplianceRunnerE2ETests
     {
         // Distinguishes "filtered out" from "examined": a filtered file never reaches the
         // File.Exists branch, so the [SKIP] line is what proves this one was not filtered.
+        // Inside a real Datasets directory for the same reason as the test above.
         var (exitCode, stdout) = RunnerFixture.Run("DatasetComplianceRunner",
-            "--output", "json", "BHoM_Datasets/Versioning_Rules.json");
+            "--output", "json", "Datasets/Versioning_Rules.json");
 
         Assert.Multiple(() =>
         {
             Assert.That(exitCode, Is.EqualTo(0));
             Assert.That(stdout, Does.Contain("[SKIP] File not found"));
+        });
+    }
+
+    [Test]
+    [Description("A .json file in a *_Datasets project directory is filtered before BHoM is called, on the directory anchoring alone rather than on its name.")]
+    public void FileInADatasetsProjectDirectory_IsNotExamined()
+    {
+        // A project directory named *_Datasets holds code, not datasets. This name carries no
+        // upgrade-map signal, so the anchoring is the only thing that can take it out of scope.
+        var (exitCode, stdout) = RunnerFixture.Run("DatasetComplianceRunner",
+            "--output", "json", "BHoM_Datasets/Rules.json");
+
+        var root = JsonDocument.Parse(stdout).RootElement;
+        Assert.Multiple(() =>
+        {
+            Assert.That(exitCode, Is.EqualTo(0));
+            Assert.That(root.GetProperty("status").GetString(),         Is.EqualTo("Pass"));
+            Assert.That(root.GetProperty("annotationCount").GetInt32(), Is.EqualTo(0));
+            Assert.That(stdout, Does.Not.Contain("[SKIP] File not found"));
         });
     }
 
