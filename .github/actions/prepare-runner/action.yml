@@ -118,7 +118,19 @@ runs:
             # Hash the runner source tree so the cache busts exactly when
             # the source changes.
             $srcDir  = Join-Path $root "${{ inputs.source_dir }}"
-            $content = (Get-ChildItem $srcDir -Recurse -File |
+
+            # An empty or mis-specified source directory hashes to the digest of an empty
+            # string, which is a constant. The key would then stop discriminating between
+            # runner versions and restore a binary built from different source, and the
+            # "Runner source:" line below would still print a plausible-looking hash. Fail
+            # instead: there is no correct cache key for a source tree that is not there.
+            $srcFiles = @(Get-ChildItem $srcDir -Recurse -File -ErrorAction SilentlyContinue)
+            if ($srcFiles.Count -eq 0) {
+              Write-Host "::error title=PrepareRunner::No files found under '$srcDir', so the content hash that keys the runner cache would be the digest of an empty string and the same key would be reused for every runner. Check the source_dir input."
+              exit 1
+            }
+
+            $content = ($srcFiles |
                         Sort-Object FullName |
                         ForEach-Object { Get-FileHash $_.FullName -Algorithm SHA256 } |
                         Select-Object -ExpandProperty Hash) -join ''

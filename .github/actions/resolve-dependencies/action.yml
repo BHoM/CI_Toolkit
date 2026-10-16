@@ -170,12 +170,28 @@ runs:
       id: shas
       shell: pwsh
       run: |
+        # Absent and empty are different facts and were treated as one. The 'Prepare folders'
+        # step above creates this file unconditionally, so absence means that step did not run,
+        # which is a fault in the action. Empty means it ran and no dependency was declared,
+        # which is ordinary. Both used to produce an empty keypart, and an empty keypart skips
+        # the restore and the build alike: a repository that does declare dependencies would
+        # then compile against whatever happened to be staged, and report success.
+        #
+        # Same shape as ci-versioning's subject assembly list, which separates the two for the
+        # same reason.
         if (-not (Test-Path 'deps/_shas.txt')) {
+          Write-Host "::error title=Dependencies::deps/_shas.txt is missing. The 'Prepare folders' step creates it unconditionally, so its absence means that step never ran and no dependency was resolved or built. This is a fault in the check, not in this repository."
+          exit 1
+        }
+
+        $pairs = Get-Content 'deps/_shas.txt' | Where-Object { $_ -match '\S+\s+[0-9a-f]+' }
+
+        if (@($pairs).Count -eq 0) {
+          Write-Host "::notice title=Dependencies::No dependencies declared, so there is nothing to restore or build."
           "keypart=" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           exit 0
         }
 
-        $pairs = Get-Content 'deps/_shas.txt' | Where-Object { $_ -match '\S+\s+[0-9a-f]+' }
         $keypart = ($pairs | Sort-Object | ForEach-Object {
             $s = $_.Trim().Split(" ")
             "$($s[0])@$($s[1])"
