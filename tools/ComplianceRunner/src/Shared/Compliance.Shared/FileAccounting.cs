@@ -4,10 +4,11 @@ using System.Collections.Generic;
 /// Counts what a compliance runner did with the files it was handed, and renders that as a
 /// coverage denominator.
 ///
-/// Both runners walk the same four-exit loop: a file is dropped by the filter, dropped because
-/// it is not on disk, dropped because the engine returned no result, or examined. Without a
-/// count of those, a run that examined every file and a run that examined none produce the same
-/// output, so a green check carries no evidence that anything was checked.
+/// Both runners walk the same five-exit loop: a file is dropped by the filter, dropped because
+/// it is not on disk, dropped because the engine returned no result, examined, or failed because
+/// the engine threw on it. Without a count of those, a run that examined every file and a run
+/// that examined none produce the same output, so a green check carries no evidence that
+/// anything was checked.
 ///
 /// Deliberately free of BHoM types and of any dependency on either runner, so it can be
 /// compiled directly into the hermetic test project and its arithmetic and wording tested
@@ -37,19 +38,31 @@ public sealed class FileAccounting
     /// <summary>Files the runner actually examined and merged into its verdict.</summary>
     public int Examined { get; private set; }
 
+    /// <summary>
+    /// Files the engine threw on. Counted apart from the other drops because it is the only one
+    /// that means the check could not answer, rather than that it had nothing to answer about.
+    /// </summary>
+    public int Failed { get; private set; }
+
     public FileAccounting(int handedIn) => HandedIn = handedIn;
 
     public void CountNotRelevant() => NotRelevant++;
     public void CountNotOnDisk()   => NotOnDisk++;
     public void CountNoResult()    => NoResult++;
     public void CountExamined()    => Examined++;
+    public void CountFailed()      => Failed++;
 
     /// <summary>
     /// True when files were supplied and none of them was examined. The calling workflow exits
     /// before invoking a runner when it has no files at all, so this is the anomalous case
     /// rather than the empty one: something selected these files and the runner used none.
+    ///
+    /// A run with failures is excluded deliberately. This flag exists to catch a check that
+    /// reports success having inspected nothing, and its warning says exactly that. A run that
+    /// failed on every file is already red and already carries an annotation per file, so
+    /// raising it here would contradict the exit code.
     /// </summary>
-    public bool ExaminedNothing => HandedIn > 0 && Examined == 0;
+    public bool ExaminedNothing => HandedIn > 0 && Examined == 0 && Failed == 0;
 
     /// <summary>
     /// The coverage line. Leads with what was examined rather than with what was handed in:
@@ -75,6 +88,7 @@ public sealed class FileAccounting
         if (NotRelevant > 0) parts.Add($"{NotRelevant} not relevant to this check");
         if (NotOnDisk   > 0) parts.Add($"{NotOnDisk} not found on disk");
         if (NoResult    > 0) parts.Add($"{NoResult} returned no result");
+        if (Failed      > 0) parts.Add($"{Failed} could not be analysed");
         return parts.Count == 0 ? "none dropped" : string.Join(", ", parts);
     }
 
@@ -86,5 +100,6 @@ public sealed class FileAccounting
         ["notRelevant"] = NotRelevant,
         ["notOnDisk"]   = NotOnDisk,
         ["noResult"]    = NoResult,
+        ["failed"]      = Failed,
     };
 }
