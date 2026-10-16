@@ -111,7 +111,14 @@ runs:
           }
         } else {
           # Only dataset .json files changed: run just those.
+          #
+          # Reaching this branch means the changed-file step counted dataset changes, so the
+          # list it writes must exist. If it does not, the count and the file disagree and the
+          # check is about to skip every fixture and report success. Say so: the two sibling
+          # branches above both announce what they did, and a silent skip here is the one
+          # outcome a reader cannot tell from "nothing relevant changed".
           if (-not (Test-Path changed_datasets.txt)) {
+            Write-Host "::warning title=DatasetTests::$datasetCount dataset file(s) were reported as changed but changed_datasets.txt is absent, so no fixture was run. The file-selection step and the count it produced disagree; this is a fault in the check, not in this repository."
             "count=0" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           } else {
             # Resolve to absolute paths so annotations match the all-fixtures

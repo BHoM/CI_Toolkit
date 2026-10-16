@@ -21,7 +21,14 @@ function Invoke-BHoMBuild {
     # Fail fast on non-SDK project files — scoped to solution-referenced projects only to
     # avoid false positives on out-of-solution files (e.g. .ci/ test helpers).
     if ($Target -match '\.sln$') {
-        $projectsToCheck = @(dotnet sln $Target list 2>$null |
+        # A failed enumeration and a solution with no projects both yield an empty set once
+        # stderr is discarded, and an empty set clears the gate below having examined nothing.
+        $slnProjects = @(dotnet sln $Target list 2>$null)
+        if ($LASTEXITCODE -ne 0) {
+            throw "Could not enumerate projects in '$Target' (dotnet sln list exited $LASTEXITCODE), so the non-SDK project check could not run."
+        }
+
+        $projectsToCheck = @($slnProjects |
             Where-Object { $_ -match '\.csproj$' } |
             ForEach-Object { Join-Path $targetDir $_ })
     } else {

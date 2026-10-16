@@ -29,9 +29,18 @@ if (-not (Test-Path "altConfigs.txt")) {
     exit 0
 }
 
-# Fail fast on non-SDK project files — scoped to solution-referenced projects only.
+# Fail fast on non-SDK project files, scoped to solution-referenced projects only.
 $slnDir = Split-Path $SlnPath
-$legacyProjects = @(dotnet sln $SlnPath list 2>$null |
+
+# A failed enumeration and a solution with no projects both yield an empty set once stderr is
+# discarded, and an empty set clears the gate below having examined nothing. Check the exit code.
+$slnProjects = @(dotnet sln $SlnPath list 2>$null)
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "::error title=Build::Could not enumerate projects in '$SlnPath' (dotnet sln list exited $LASTEXITCODE), so the non-SDK project check could not run."
+    exit 1
+}
+
+$legacyProjects = @($slnProjects |
     Where-Object { $_ -match '\.csproj$' } |
     ForEach-Object { Join-Path $slnDir $_ } |
     Where-Object { Test-Path $_ } |

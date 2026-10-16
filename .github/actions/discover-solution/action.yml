@@ -52,7 +52,17 @@ runs:
         $slnPath = $sln.FullName
 
         if ($env:REQUIRE_SDK_STYLE -eq 'true') {
-          $legacyProjects = @(dotnet sln $slnPath list 2>$null |
+          # `dotnet sln list` failing is indistinguishable from a solution with no projects
+          # once its stderr is discarded: both yield an empty set, and an empty set passes the
+          # gate below having examined nothing. Check the exit code so a broken enumeration
+          # fails loudly rather than clearing the only thing enforcing SDK-style projects.
+          $slnProjects = @(dotnet sln $slnPath list 2>$null)
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error title=$title::Could not enumerate projects in '$slnPath' (dotnet sln list exited $LASTEXITCODE), so the non-SDK project check could not run."
+            exit 1
+          }
+
+          $legacyProjects = @($slnProjects |
             Where-Object { $_ -match '\.csproj$' } |
             ForEach-Object { Join-Path (Split-Path $slnPath) $_ } |
             Where-Object { Test-Path $_ } |
