@@ -52,6 +52,37 @@ runs:
         patterns: ${{ inputs.patterns }}
         output_file: changed_files.txt
 
+    # A skipped job writes nothing to the summary, so a green with no files to check and a
+    # green that checked everything read the same there. The runner's coverage line solves
+    # this only once the runner runs, and on a skip it never does. Says which pathspec was
+    # searched, because the one way a skip is wrong is the pathspec missing a file that did
+    # change, and that is not diagnosable from "skipped" alone.
+    - name: Report the skip
+      if: steps.changed.outputs.count == '0'
+      shell: bash
+      env:
+        CHECK_TYPE: ${{ inputs.check_type }}
+        PATTERNS:   ${{ inputs.patterns }}
+        REASON:     ${{ steps.changed.outputs.reason }}
+      run: |
+        set -euo pipefail
+
+        if [ "$REASON" = "not-a-pull-request" ]; then
+          detail="This run was not triggered by a pull request, so there was no diff to examine."
+        else
+          detail="No files matching \`${PATTERNS}\` changed in this pull request, so no file was examined."
+        fi
+
+        echo "::notice title=${CHECK_TYPE} compliance::Skipped. ${detail}"
+
+        if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+          {
+            echo "### ${CHECK_TYPE} compliance skipped"
+            echo ""
+            echo "${detail}"
+          } >> "$GITHUB_STEP_SUMMARY"
+        fi
+
     - name: Mint dependency token
       id: dep-token
       if: steps.changed.outputs.count != '0'

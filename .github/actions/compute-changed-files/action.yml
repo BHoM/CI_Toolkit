@@ -31,6 +31,14 @@ outputs:
       '0' signals callers to skip; any other value signals proceed. May
       exceed the output_file line count, which excludes deletions.
     value: ${{ steps.compute.outputs.count }}
+  reason:
+    description: >
+      Why the count came out as it did: 'files-changed', 'no-matching-files'
+      or 'not-a-pull-request'. A caller reporting its own skip needs this to
+      say which one happened; the count alone collapses the last two, and a
+      summary line claiming no files changed when the run was never a pull
+      request would be wrong.
+    value: ${{ steps.compute.outputs.reason }}
 
 runs:
   using: composite
@@ -58,6 +66,7 @@ runs:
         # failure mode for this action, because every consumer treats count=0
         # as "nothing to do".
         if [ -z "$BASE_SHA" ]; then
+          echo "reason=not-a-pull-request" >> "$GITHUB_OUTPUT"
           if [ "$SKIP_IF_NOT_PR" = "true" ]; then
             echo "count=0" >> "$GITHUB_OUTPUT"
             echo "::notice::Not triggered from a pull request. Check skipped."
@@ -127,7 +136,9 @@ runs:
         echo "count=$count" >> "$GITHUB_OUTPUT"
 
         if [ "$count" -gt 0 ]; then
+          echo "reason=files-changed" >> "$GITHUB_OUTPUT"
           echo "::notice::$count relevant file(s) changed."
         else
+          echo "reason=no-matching-files" >> "$GITHUB_OUTPUT"
           echo "::notice::No relevant files changed. Check skipped."
         fi

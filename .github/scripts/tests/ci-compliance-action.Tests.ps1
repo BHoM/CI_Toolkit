@@ -17,6 +17,7 @@ BeforeAll {
     $script:actionPath = Join-Path $repoRoot '.github/actions/ci-compliance/action.yml'
     $script:lines = Get-Content $actionPath
     $script:text  = $lines -join "`n"
+    $script:changedFiles = Get-Content (Join-Path $repoRoot '.github/actions/compute-changed-files/action.yml') -Raw
 }
 
 Describe 'ci-compliance action.yml' {
@@ -38,6 +39,42 @@ Describe 'ci-compliance action.yml' {
         # so both ends of the contract are asserted here.
         It 'reads the count off the line the runner emits' {
             $text | Should -Match "match '\^Coverage: '"
+        }
+    }
+
+    Context 'a self-skip says so' {
+
+        # The coverage line only exists once the runner runs. On a skip it never does, so
+        # without this the summary is empty and a green that had nothing to check reads the
+        # same as a green that checked everything.
+        It 'writes to the summary when the check is skipped' {
+            $text | Should -Match 'compliance skipped'
+        }
+
+        It 'names the pathspec it searched' {
+            $text | Should -Match 'PATTERNS' -Because 'the one way a skip is wrong is the pathspec missing a file that did change, and that is not diagnosable from "skipped" alone'
+        }
+
+        # Two different states both produce count=0. Saying "no files changed" when the run was
+        # never a pull request would be a wrong statement, not just a vague one.
+        It 'distinguishes an empty diff from a run that was never a pull request' {
+            $text | Should -Match 'not-a-pull-request'
+        }
+
+        It 'takes that reason from the action that knows it' {
+            $text | Should -Match 'steps\.changed\.outputs\.reason' -Because 'compute-changed-files is the only place the two cases are told apart'
+        }
+
+        # The other end of that contract. A consumer reading an output no producer sets gets an
+        # empty string and falls through to the wrong branch, silently.
+        It 'is an output compute-changed-files actually declares' {
+            $changedFiles | Should -Match '(?m)^\s{2}reason:'
+        }
+
+        It 'sets a reason on every path out of compute-changed-files' {
+            foreach ($r in 'not-a-pull-request', 'no-matching-files', 'files-changed') {
+                $changedFiles | Should -Match "reason=$r"
+            }
         }
     }
 }
