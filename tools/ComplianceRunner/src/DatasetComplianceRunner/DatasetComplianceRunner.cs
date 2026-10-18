@@ -53,46 +53,71 @@ class DatasetComplianceRunner
                 continue;
             }
 
-            var resultForThisFile = file.IsValidDataset();
-
-            if (resultForThisFile == null)
+            // One file must not take the run down with it, for the same reason it must not in
+            // ComplianceRunner: an escaping exception kills the process before OutputEmitter
+            // runs, so the check goes red with no annotation, no coverage line, and no name for
+            // the file that caused it, and the findings already gathered for every other file
+            // are lost. The run still fails below on accounting.Failed, so this converts a
+            // silent abort into a stated one rather than making the check more permissive.
+            //
+            // IsValidDataset opens the file with an unguarded StreamReader before it parses
+            // anything, so the throw does not need a malformed dataset to reach it. Reproduced
+            // by holding the file open with no sharing, which is what an antivirus scan or a
+            // concurrent step does.
+            try
             {
-                accounting.CountNoResult();
-                Console.WriteLine($"  [SKIP] No result returned for: {file}");
-                continue;
-            }
+                var resultForThisFile = file.IsValidDataset();
 
-            if (verbose) Console.WriteLine($"  Result Status: {resultForThisFile.Status}");
-
-            accounting.CountExamined();
-            mergedResult = mergedResult.Merge(resultForThisFile);
-
-            var information        = resultForThisFile.Information ?? Enumerable.Empty<ITestInformation>();
-            var perFileAnnotations = information
-                .Select(i => i.ToAnnotationEquivalent())
-                .ToList();
-            var infoList = information.ToList();
-
-            for (int i = 0; i < perFileAnnotations.Count; i++)
-            {
-                var a           = perFileAnnotations[i];
-                var displayPath = string.IsNullOrEmpty(a.FilePath) ? file : a.FilePath;
-                if (verbose)
+                if (resultForThisFile == null)
                 {
-                    Console.WriteLine($"  - [{a.Level}] {displayPath}:{a.LineStart}:{a.ColumnStart}" +
-                                      $"-{a.LineEnd}:{a.ColumnEnd} [{a.RuleName}]");
-                    Console.WriteLine($"    {a.Message}");
-                    if (i < infoList.Count)
-                        AnnotationConvert.LogDetailedFinding(infoList[i]);
+                    accounting.CountNoResult();
+                    Console.WriteLine($"  [SKIP] No result returned for: {file}");
+                    continue;
                 }
-                // Dataset checks don't populate Location.FilePath — anchor to the JSON file so
-                // GitHub can produce an inline PR annotation instead of falling back to "unknown".
-                if (string.IsNullOrEmpty(a.FilePath))
-                    a.FilePath = file;
-                if (a.LineStart <= 0)
-                    a.LineStart = 1;
 
-                allAnnotations.Add(a);
+                if (verbose) Console.WriteLine($"  Result Status: {resultForThisFile.Status}");
+
+                accounting.CountExamined();
+                mergedResult = mergedResult.Merge(resultForThisFile);
+
+                var information        = resultForThisFile.Information ?? Enumerable.Empty<ITestInformation>();
+                var perFileAnnotations = information
+                    .Select(i => i.ToAnnotationEquivalent())
+                    .ToList();
+                var infoList = information.ToList();
+
+                for (int i = 0; i < perFileAnnotations.Count; i++)
+                {
+                    var a           = perFileAnnotations[i];
+                    var displayPath = string.IsNullOrEmpty(a.FilePath) ? file : a.FilePath;
+                    if (verbose)
+                    {
+                        Console.WriteLine($"  - [{a.Level}] {displayPath}:{a.LineStart}:{a.ColumnStart}" +
+                                          $"-{a.LineEnd}:{a.ColumnEnd} [{a.RuleName}]");
+                        Console.WriteLine($"    {a.Message}");
+                        if (i < infoList.Count)
+                            AnnotationConvert.LogDetailedFinding(infoList[i]);
+                    }
+                    // Dataset checks don't populate Location.FilePath, so anchor to the JSON file
+                    // so GitHub can produce an inline PR annotation instead of falling back to
+                    // "unknown".
+                    if (string.IsNullOrEmpty(a.FilePath))
+                        a.FilePath = file;
+                    if (a.LineStart <= 0)
+                        a.LineStart = 1;
+
+                    allAnnotations.Add(a);
+                }
+            }
+            catch (Exception ex)
+            {
+                accounting.CountFailed();
+                allAnnotations.Add(Annotation.ForUnanalysableFile(file, ex));
+
+                // Stack trace to stderr, not into the annotation. GitHub truncates a long
+                // annotation message, and the one thing the author needs is the file name.
+                Console.Error.WriteLine($"  [FAIL] {file}: {ex.GetType().Name}: {ex.Message}");
+                Console.Error.WriteLine(ex.ToString());
             }
         }
 
@@ -102,7 +127,10 @@ class DatasetComplianceRunner
             accounting);
 
         // Exit code mirrors BHoMBot: failure only on Error; Warning and Pass are both success.
-        return mergedResult.Status == TestStatus.Error ? 1 : 0;
+        // A file the engine threw on also fails the run. It is not a finding about the dataset,
+        // so it does not reach mergedResult, and without this a crash would exit 0 and report a
+        // green check having examined less than it was asked to.
+        return mergedResult.Status == TestStatus.Error || accounting.Failed > 0 ? 1 : 0;
     }
 
 }

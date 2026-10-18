@@ -152,4 +152,98 @@ public class DatasetComplianceRunnerE2ETests
             Assert.That(stdout, Does.Contain("::warning title=Compliance coverage::"));
         });
     }
+
+    // ── A file the engine throws on ───────────────────────────────────────────
+
+    /// <summary>
+    /// Writes a dataset file and a sibling under a real Datasets directory, so both pass the
+    /// filter and reach the engine, and returns the pair with the directory to clean up.
+    ///
+    /// The sibling carries a genuine finding. Without it a test cannot tell "the run continued"
+    /// from "the run died quietly".
+    /// </summary>
+    private static (string Target, string Sibling, string Dir) WriteDatasetPair()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "bhom-ci-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(dir, "Datasets"));
+
+        string target = Path.Combine(dir, "Datasets", "Target.json");
+        File.WriteAllText(target, "{ \"_t\" : \"BH.oM.Data.Library.Dataset\" }");
+
+        string sibling = Path.Combine(dir, "Datasets", "Sibling.json");
+        File.WriteAllText(sibling, "not a dataset");
+
+        return (target, sibling, dir);
+    }
+
+    [Test]
+    [Category("RequiresBHoM")]
+    [Platform("Win", Reason = "FileShare.None only blocks another process on Windows; on Unix .NET's sharing mode is advisory, so the file would open and nothing would throw.")]
+    [Description("A dataset file the engine throws on fails the run, names itself, and does not stop the other files being reported.")]
+    public void UnanalysableFile_FailsTheRunAndIsNamed_WithoutLosingOtherFindings()
+    {
+        var (target, sibling, dir) = WriteDatasetPair();
+        try
+        {
+            // Held open with no sharing, which is what an antivirus scan or a concurrent step
+            // does. IsValidDataset opens the file with an unguarded StreamReader before it
+            // parses anything, so this reaches the throw without needing a malformed dataset,
+            // and the file stays a valid one so the test is not really about its content.
+            using (File.Open(target, FileMode.Open, FileAccess.Read, FileShare.None))
+            {
+                var (exitCode, stdout) = RunnerFixture.Run("DatasetComplianceRunner",
+                    "--output", "github", target, sibling);
+
+                Assert.Multiple(() =>
+                {
+                    Assert.That(exitCode, Is.EqualTo(1), "a file the engine could not analyse must fail the run");
+                    Assert.That(stdout, Does.Contain("Target.json"),
+                        "the failing file must be named, or the author cannot act on the red");
+                    Assert.That(stdout, Does.Contain("could not be analysed"));
+                    Assert.That(stdout, Does.Contain("1 of 2 file(s) examined"),
+                        "the coverage line must survive, which it cannot if the process died");
+                    Assert.That(stdout, Does.Contain("did not deserialise"),
+                        "the other file's finding must still be reported; losing them was the defect");
+                });
+            }
+        }
+        finally
+        {
+            try { Directory.Delete(dir, recursive: true); } catch { /* temp dir, best effort */ }
+        }
+    }
+
+    [Test]
+    [Category("RequiresBHoM")]
+    [Platform("Win", Reason = "FileShare.None only blocks another process on Windows; on Unix .NET's sharing mode is advisory, so the file would open and nothing would throw.")]
+    [Description("A run whose only dataset could not be analysed still fails, on the failure alone.")]
+    public void UnanalysableFileAlone_StillFailsTheRun()
+    {
+        // Separate from the test above because that one cannot see this. Its sibling carries a
+        // real finding, so the run exits 1 on the merged Error whether or not failures count
+        // towards the exit code. With nothing else in the run the exit code here rests on the
+        // failure count and nothing else.
+        var (target, _, dir) = WriteDatasetPair();
+        try
+        {
+            using (File.Open(target, FileMode.Open, FileAccess.Read, FileShare.None))
+            {
+                var (exitCode, stdout) = RunnerFixture.Run("DatasetComplianceRunner",
+                    "--output", "github", target);
+
+                Assert.Multiple(() =>
+                {
+                    Assert.That(exitCode, Is.EqualTo(1),
+                        "a run that could analyse nothing must not report success");
+                    Assert.That(stdout, Does.Contain("0 of 1 file(s) examined"));
+                    Assert.That(stdout, Does.Not.Contain("reports success without having inspected anything"),
+                        "that warning is for a green that examined nothing, and this run is red");
+                });
+            }
+        }
+        finally
+        {
+            try { Directory.Delete(dir, recursive: true); } catch { /* temp dir, best effort */ }
+        }
+    }
 }

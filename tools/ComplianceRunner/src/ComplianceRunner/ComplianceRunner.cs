@@ -169,7 +169,7 @@ class ComplianceRunner
             catch (Exception ex)
             {
                 accounting.CountFailed();
-                allAnnotations.Add(FailureAnnotation(file, ex));
+                allAnnotations.Add(Annotation.ForUnanalysableFile(file, ex));
 
                 // Stack trace to stderr, not into the annotation. GitHub truncates a long
                 // annotation message, and the one thing the author needs is the file name.
@@ -188,25 +188,4 @@ class ComplianceRunner
         // green check having examined less than it was asked to.
         return mergedResult.Status == TestStatus.Error || accounting.Failed > 0 ? 1 : 0;
     }
-
-    /// <summary>
-    /// The annotation for a file the engine threw on. Carries the exception type and message so
-    /// the author can tell a malformed file from an environment problem, and says plainly that
-    /// this file was not checked, because a failure annotation that looks like a finding would
-    /// send them looking for a defect in their own code.
-    /// </summary>
-    static Annotation FailureAnnotation(string file, Exception ex) => new Annotation
-    {
-        FilePath    = file,
-        LineStart   = 1,
-        LineEnd     = 1,
-        ColumnStart = 1,
-        ColumnEnd   = 1,
-        Level       = "failure",
-        RuleName    = "FileCouldNotBeAnalysed",
-        Message     = $"This file could not be analysed and was not checked. "
-                    + $"{ex.GetType().Name}: {ex.Message} "
-                    + $"Every other file in this run was checked normally.",
-        UTCTime     = DateTime.UtcNow,
-    };
 }
