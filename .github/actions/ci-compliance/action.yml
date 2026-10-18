@@ -193,6 +193,23 @@ runs:
             $summary += ""
             $summary += $coverage
           }
+
+          # Which engine produced this verdict. resolve-dependencies already records it, in a
+          # dependency table further up the job, and someone diagnosing a red is looking here.
+          # A compliance failure is nearly always either the file or the rules, and nothing
+          # else on this surface names the rules. The rules track Test_Toolkit's branch by
+          # decision rather than by default, so the version has to be visible instead.
+          $ttSha = '${{ steps.tt-sha.outputs.sha }}'
+          $summary += ""
+          if ($ttSha.Length -ge 7) {
+            $summary += 'Rules from Test_Toolkit `' + $ttSha.Substring(0, 7) + '`.'
+          } else {
+            # Said rather than left blank. An absent SHA means the dependency metadata did not
+            # record it, which also means the runner cache key lost its Test_Toolkit component
+            # on this run, so it is worth seeing rather than reading as "no engine involved".
+            $summary += "Rules from Test_Toolkit, commit not recorded."
+          }
+
           $summary | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
         }
 

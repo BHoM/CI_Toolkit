@@ -153,6 +153,23 @@ runs:
         configuration:    Release
         token:            ${{ steps.dep-token.outputs.token }}
 
+    # UnitTest_Engine, UnitTest_oM, Test_Engine, Test_oM and CodeComplianceTest_oM (all from
+    # Test_Toolkit) are copied into the DatasetTestRunner output, so the cached runner is a
+    # copy of the test engine rather than a pointer to it. The cache key must therefore
+    # include Test_Toolkit's SHA, or a change to the engine is ignored until the cache expires
+    # on its own and the job reports on a version nothing names. ci-compliance does the same,
+    # for the same reason.
+    - name: Read Test_Toolkit SHA for cache key
+      id: tt-sha
+      if: steps.scope.outputs.count != '0'
+      shell: bash
+      run: |
+        sha=""
+        if [ -f "deps/_shas.txt" ]; then
+          sha=$(grep '^${{ inputs.test_toolkit_repo }} ' deps/_shas.txt | awk '{print $2}' || true)
+        fi
+        echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+
     # The caller solution must be built so its DLLs are staged to
     # C:\ProgramData\BHoM\Assemblies via the repo's PostBuildEvent.
     # CheckTest() reflects over those assemblies at fixture execution time.
@@ -192,7 +209,7 @@ runs:
         runner_project: tools/ComplianceRunner/src/DatasetTestRunner/DatasetTestRunner.csproj
         output_dir:     out\runner
         configuration:  Release
-        cache_prefix:   dataset-test-runner
+        cache_prefix:   dataset-test-runner-tt${{ steps.tt-sha.outputs.sha }}
         dotnet_version: ${{ inputs.runner_dotnet_version }}
 
     - name: Run dataset unit tests

@@ -42,6 +42,26 @@ Describe 'ci-compliance action.yml' {
         }
     }
 
+    Context 'the summary names the engine that produced the verdict' {
+
+        # The rules come from Test_Toolkit's branch rather than a pinned version, by decision.
+        # That decision is only safe while the version is visible, and the summary is where
+        # someone looking at a red actually looks. See #34.
+        It 'names the Test_Toolkit commit alongside the coverage line' {
+            $text | Should -Match 'Rules from Test_Toolkit'
+        }
+
+        It 'takes the commit from the step that already reads it for the cache key' {
+            $text | Should -Match 'steps\.tt-sha\.outputs\.sha' -Because 'a second lookup could disagree with the one the cache key used, which is the one that decided which engine ran'
+        }
+
+        # An absent SHA is not nothing: it also means the cache key lost its Test_Toolkit
+        # component on that run. Silence would read as "no engine involved".
+        It 'says so when the commit was not recorded, rather than omitting the line' {
+            $text | Should -Match 'commit not recorded'
+        }
+    }
+
     Context 'a self-skip says so' {
 
         # The coverage line only exists once the runner runs. On a skip it never does, so
