@@ -767,7 +767,7 @@ runs:
         # An infrastructure failure and a versioning finding need different action
         # from the developer, and the job conclusion does not distinguish them. A
         # dependency build failure previously showed as a red versioning check with
-        # no indication that versioning never ran. Measured on Revit_UI#696.
+        # no indication that versioning never ran. Measured on a real pull request.
         $infraStep = ''
         if     ("${{ steps.deps.conclusion }}"          -eq 'failure') { $infraStep = 'Resolve dependencies' }
         elseif ("${{ steps.build_subject.conclusion }}" -eq 'failure') { $infraStep = 'Build primary repo' }

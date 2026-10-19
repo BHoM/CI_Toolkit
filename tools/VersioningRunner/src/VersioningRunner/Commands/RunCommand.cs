@@ -412,8 +412,9 @@ public static class RunCommand
     // assembly that yields the declaring type. Where two repos declare the same type,
     // whichever is enumerated first decides whether the finding reads as a genuine
     // regression or as an infrastructure problem. That is CI_Toolkit#161's mechanism:
-    // BH.Revit.Engine.Core.Compute is defined by both Revit_Core_Engine and
-    // Revit_ModelQA_Engine, and 42 such type-level collisions exist across the fleet.
+    // BH.Revit.Engine.Core.Compute is defined by Revit_Core_Engine and by a second
+    // engine assembly in another repository, and dozens of such type-level collisions
+    // exist across the fleet.
     //
     // Directory.GetFiles documents no ordering. Measured on windows-2025-vs2026 across
     // four cold-rebuild runs on separate runners, NTFS returned exactly
@@ -659,9 +660,9 @@ public static class RunCommand
             // prefix is genuinely all the evidence there is on that path.
             //
             // No namespace rule can be made correct here, so precision is not the fix:
-            // BH.oM.Structure.Elements is declared by both BHoM/BHoM and
-            // StructuralEngineering_Toolkit, and a string cannot say which of two repos
-            // sharing a namespace owns a type. Measured on BHoM/BHoM (run 33849699768,
+            // BH.oM.Structure.Elements is declared by BHoM/BHoM and by a downstream
+            // toolkit as well, and a string cannot say which of two repos sharing a
+            // namespace owns a type. Measured on BHoM/BHoM (run 33849699768,
             // commit d6db0a1): 145 of 145 findings arrived on this path and 0 by declaring
             // assembly, and 145 of 145 turned out to be another repository's or an artefact
             // of an incomplete closure. Re-running the same subject against a closure with
@@ -944,8 +945,8 @@ public static class RunCommand
         return false;
     }
 
-    // "Method DuctLogicalOrFilter from { "_t" : "System.Type", "Name" : "BH.Revit.Engine
-    //  .MechanicalPlumbing.Create, Revit_MechanicalPlumbing_Engine_2022, ..." ... } failed
+    // "Method SomeMethod from { "_t" : "System.Type", "Name" : "BH.Example.Engine
+    //  .Area.Create, Example_Area_Engine_2022, ..." ... } failed
     //  to deserialise." — the only event some failures carry. It names the method and its
     // declaring type where Description has been mangled to "...Create. }" by
     // Versioning_Toolkit's DescriptionFromJson, so it is the better label as well as the

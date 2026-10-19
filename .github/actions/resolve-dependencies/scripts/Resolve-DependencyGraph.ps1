@@ -129,7 +129,7 @@ function Clone-And-Checkout([string]$ownerRepo, [string]$ref) {
     # compared two legs that shared the same dependency code. A regression introduced on the
     # dependency side appeared in both and cancelled out.
     #
-    # This is BHoMBot's shape, deliberately. LoadDependencies (CodeBuild_Engine) cloned if
+    # This is BHoMBot's shape, deliberately. Its dependency loader cloned if
     # absent and then always called CheckoutBranch with the branch as an explicit argument, and
     # ResetBuiltRepos() cleared the memo that would otherwise have skipped the re-checkout. The
     # divergence from BHoMBot is that the memo has no equivalent here and needs none: there is

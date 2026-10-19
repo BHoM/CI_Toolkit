@@ -8,7 +8,7 @@ using BH.oM.Test;
 ///
 /// GitHub consumes file/line/col as annotation metadata and strips them from the rendered log
 /// line, so the offending file has to be present in the title property and in the message text
-/// for a failure to be actionable from the job log. See CI_Toolkit_Proxy issue #22.
+/// for a failure to be actionable from the job log.
 /// </summary>
 [TestFixture]
 public class OutputEmitterTests

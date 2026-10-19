@@ -46,7 +46,7 @@ FIXTURE_PATHS=(
   ".ci/DataSets/Area/capsdeep.json"      # nested but capital S: isolates casing
   "src/datasets/lower/low.json"          # lowercase, already matched
   "a/mydatasets.json"                    # substring in filename, already matched
-  "Datasets/root-direct.json"            # root-level, e.g. CFD_Toolkit
+  "Datasets/root-direct.json"            # root-level, directly under Datasets/
   "Datasets/Area/root-nested.json"       # root-level nested, e.g. a *_Datasets repo
   "DataSets/Caps/caps.json"              # root + capital S, e.g. LifeCycleAssessment_Toolkit
   "DATASETS/shouty/shout.json"           # upper case, defensive

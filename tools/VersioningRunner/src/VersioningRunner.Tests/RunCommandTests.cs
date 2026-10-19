@@ -394,8 +394,8 @@ namespace VersioningRunner.Tests
         {
             // Versioning_Toolkit's DescriptionFromJson yields "DeclaringType.MethodName".
             Assert.True(RunCommand.IsFromSubjectNamespace(
-                "BH.Revit.Engine.MechanicalPlumbing.Compute.SpaceRoomPairs",
-                Namespaces("BH.Revit.Engine.MechanicalPlumbing")));
+                "BH.Example.Engine.Area.Compute.SpaceRoomPairs",
+                Namespaces("BH.Example.Engine.Area")));
         }
 
         [Fact]
@@ -519,7 +519,7 @@ namespace VersioningRunner.Tests
         private const string RevitCause =
             "Type Autodesk.Revit.DB.Document, RevitAPI, Version=9.0.0.0, Culture=neutral, PublicKeyToken=null failed to deserialise.";
         private const string MethodCause =
-            "Method ApplyDuctInsulation from { \"_t\" : \"System.Type\", \"Name\" : \"BH.Revit.Engine.MechanicalPlumbing.Compute, Revit_MechanicalPlumbing_Engine_2022, Version=9.0.0.0, Culture=neutral, PublicKeyToken=null\", \"_bhomVersion\" : \"9.2\" } failed to deserialise.";
+            "Method ApplyAreaOffset from { \"_t\" : \"System.Type\", \"Name\" : \"BH.Example.Engine.Area.Compute, Example_Area_Engine_2022, Version=9.0.0.0, Culture=neutral, PublicKeyToken=null\", \"_bhomVersion\" : \"9.2\" } failed to deserialise.";
 
         // The object-record shapes, also verbatim from a real run (BHoM/BHoM 33849699768).
         // A nested fragment from a downstream toolkit names itself here.
@@ -679,7 +679,7 @@ namespace VersioningRunner.Tests
             var leaf = new FakeTestInfo
             {
                 Status = "Error",
-                Description = "BH.Revit.Engine.MechanicalPlumbing.Compute.ApplyDuctInsulation",
+                Description = "BH.Example.Engine.Area.Compute.ApplyAreaOffset",
                 Message = "Error: Returned null from json.",
                 Information = [
                     new FakeEventMessage { Message = RevitCause },
@@ -726,8 +726,8 @@ namespace VersioningRunner.Tests
         public void MethodEvent_YieldsDeclaringTypeAndMethodName()
         {
             var (type, method) = RunCommand.ParseMethodEvent(MethodCause);
-            Assert.Equal("BH.Revit.Engine.MechanicalPlumbing.Compute", type);
-            Assert.Equal("ApplyDuctInsulation", method);
+            Assert.Equal("BH.Example.Engine.Area.Compute", type);
+            Assert.Equal("ApplyAreaOffset", method);
         }
 
         [Fact]
@@ -755,17 +755,17 @@ namespace VersioningRunner.Tests
         [Fact]
         public void NoTypeEventsButAnUnresolvableSignature_IsUnverifiedNotFailed()
         {
-            // The real case: Create.DuctLogicalOrFilter(bool,bool,bool) exists with exactly
+            // The real case: Create.AreaLogicalOrFilter(bool,bool,bool) exists with exactly
             // the recorded signature, but returns Autodesk.Revit.DB.LogicalOrFilter, so no
             // type-level cause is ever recorded. The probe is the only way to tell.
             var leaf = new FakeTestInfo
             {
                 Status = "Error",
-                Description = "BH.Revit.Engine.MechanicalPlumbing.Create. }",
+                Description = "BH.Example.Engine.Area.Create. }",
                 Message = "Error: Returned null from json.",
                 Information = [new FakeEventMessage
                 {
-                    Message = MethodCause.Replace("ApplyDuctInsulation", "DuctLogicalOrFilter")
+                    Message = MethodCause.Replace("ApplyAreaOffset", "AreaLogicalOrFilter")
                                          .Replace(".Compute,", ".Create,")
                 }]
             };
@@ -780,7 +780,7 @@ namespace VersioningRunner.Tests
             Assert.Single(skips);
             Assert.Equal("Autodesk.Revit.DB.LogicalOrFilter", skips[0].Cause);
             // And the mangled description is replaced by the event's own naming.
-            Assert.Equal("BH.Revit.Engine.MechanicalPlumbing.Create.DuctLogicalOrFilter", skips[0].Description);
+            Assert.Equal("BH.Example.Engine.Area.Create.AreaLogicalOrFilter", skips[0].Description);
         }
 
         [Fact]
@@ -789,11 +789,11 @@ namespace VersioningRunner.Tests
             var leaf = new FakeTestInfo
             {
                 Status = "Error",
-                Description = "BH.Revit.Engine.MechanicalPlumbing.Create. }",
+                Description = "BH.Example.Engine.Area.Create. }",
                 Message = "Error: Returned null from json.",
                 Information = [new FakeEventMessage
                 {
-                    Message = MethodCause.Replace("ApplyDuctInsulation", "SomethingGenuine")
+                    Message = MethodCause.Replace("ApplyAreaOffset", "SomethingGenuine")
                                          .Replace(".Compute,", ".Create,")
                 }]
             };
@@ -804,7 +804,7 @@ namespace VersioningRunner.Tests
             var result = RunCommand.ExtractFilteredResult(outer, (_, _) => (true, AttributionBasis.NotRecorded), null, probeSignature: (_, _, _) => (null, ClassificationPath.NoOverloadFound, Array.Empty<string>()));
 
             Assert.Equal(1, result.FailureCount);
-            Assert.Equal("BH.Revit.Engine.MechanicalPlumbing.Create.SomethingGenuine",
+            Assert.Equal("BH.Example.Engine.Area.Create.SomethingGenuine",
                 result.Failures[0].Description);
         }
 
@@ -879,7 +879,7 @@ namespace VersioningRunner.Tests
             "Type Autodesk.Revit.DB.Document, RevitAPI, Version=9.0.0.0 failed to deserialise.";
 
         private const string MethodCause =
-            "Method ApplyDuctInsulation from { \"_t\" : \"System.Type\", \"Name\" : \"BH.Revit.Engine.MechanicalPlumbing.Compute, Revit_MechanicalPlumbing_Engine_2022, Version=9.0.0.0, Culture=neutral, PublicKeyToken=null\", \"_bhomVersion\" : \"9.2\" } failed to deserialise.";
+            "Method ApplyAreaOffset from { \"_t\" : \"System.Type\", \"Name\" : \"BH.Example.Engine.Area.Compute, Example_Area_Engine_2022, Version=9.0.0.0, Culture=neutral, PublicKeyToken=null\", \"_bhomVersion\" : \"9.2\" } failed to deserialise.";
 
         private static FakeTestResult Tree(string description, params string[] eventMessages)
         {
@@ -928,14 +928,14 @@ namespace VersioningRunner.Tests
         public void ProbeVerdict_AndDeclaringAssembly_AreCarriedIntoTheDiagnostic()
         {
             var diagnostics = new List<FailureDiagnostic>();
-            RunCommand.ExtractFilteredResult(Tree("BH.Revit.Engine.MechanicalPlumbing.Compute. }", MethodCause),
+            RunCommand.ExtractFilteredResult(Tree("BH.Example.Engine.Area.Compute. }", MethodCause),
                 (_, _) => (true, AttributionBasis.NotRecorded), null, (_, _, _) => (null, ClassificationPath.DeclaringTypeNotLoaded, Array.Empty<string>()), diagnostics);
 
             var only = Assert.Single(diagnostics);
             Assert.True(only.CountedAsReal);
             Assert.Equal(ClassificationPath.DeclaringTypeNotLoaded, only.Path);
-            Assert.Equal("BH.Revit.Engine.MechanicalPlumbing.Compute", only.DeclaringType);
-            Assert.Equal("Revit_MechanicalPlumbing_Engine_2022", only.DeclaringAssembly);
+            Assert.Equal("BH.Example.Engine.Area.Compute", only.DeclaringType);
+            Assert.Equal("Example_Area_Engine_2022", only.DeclaringAssembly);
         }
 
         [Fact]
@@ -945,12 +945,12 @@ namespace VersioningRunner.Tests
             // the only source is the Method event's assembly-qualified "Name".
             string? seen = "not called";
             RunCommand.ExtractFilteredResult(
-                Tree("BH.Revit.Engine.MechanicalPlumbing.Compute. }", MethodCause),
+                Tree("BH.Example.Engine.Area.Compute. }", MethodCause),
                 (_, _) => (true, AttributionBasis.NotRecorded), null,
                 (_, _, asm) => { seen = asm; return (null, ClassificationPath.DeclaringTypeNotLoaded, Array.Empty<string>()); },
                 null);
 
-            Assert.Equal("Revit_MechanicalPlumbing_Engine_2022", seen);
+            Assert.Equal("Example_Area_Engine_2022", seen);
         }
 
         [Fact]
@@ -995,7 +995,7 @@ namespace VersioningRunner.Tests
         [Fact]
         public void AssemblyParser_ReturnsNullWhenThereIsNothingToParse()
         {
-            Assert.Equal("Revit_MechanicalPlumbing_Engine_2022", RunCommand.ParseMethodEventAssembly(MethodCause));
+            Assert.Equal("Example_Area_Engine_2022", RunCommand.ParseMethodEventAssembly(MethodCause));
             Assert.Null(RunCommand.ParseMethodEventAssembly(RevitCause));
             Assert.Null(RunCommand.ParseMethodEventAssembly(""));
             Assert.Null(RunCommand.ParseMethodEventAssembly("Method with no json payload"));

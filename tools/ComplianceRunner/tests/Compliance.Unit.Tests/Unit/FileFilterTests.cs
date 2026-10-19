@@ -102,10 +102,10 @@ public class FileFilterTests
         // The upgrade-map rule on its own, so a failure says which of the two predicates moved.
         // These paths carry no "datasets" substring, so IsDatasetFile rejects them anyway and
         // could not distinguish the two.
-        [TestCase("Tagging_oM/Versioning_93.json",  ExpectedResult = true)]
-        [TestCase("Tagging_oM/Versioning_Rules.json", ExpectedResult = false)]
-        [TestCase("Versioning_93.json",             ExpectedResult = true)]  // no directory at all
-        [TestCase("Structure_oM/Versioning_93.txt", ExpectedResult = true)]  // extension is IsDatasetFile's job
+        [TestCase("Structure_oM/Versioning_93.json",    ExpectedResult = true)]
+        [TestCase("Structure_oM/Versioning_Rules.json", ExpectedResult = false)]
+        [TestCase("Versioning_93.json",                 ExpectedResult = true)]  // no directory at all
+        [TestCase("Structure_oM/Versioning_93.txt",     ExpectedResult = true)]  // extension is IsDatasetFile's job
         public bool IsVersioningUpgradeMap(string file)
             => FileFilter.IsVersioningUpgradeMap(file);
     }
