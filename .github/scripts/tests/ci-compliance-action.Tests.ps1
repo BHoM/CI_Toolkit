@@ -60,6 +60,24 @@ Describe 'ci-compliance action.yml' {
         It 'says so when the commit was not recorded, rather than omitting the line' {
             $text | Should -Match 'commit not recorded'
         }
+
+        # GitHub exposes no API for job summaries, so a line written only there can never be
+        # read back and any claim resting on it stays derived rather than observed. The log
+        # can be fetched. Asserted by position rather than by presence, because moving the
+        # emission back inside the summary guard would still match a plain text search and
+        # would silently undo the only thing that makes this checkable.
+        It 'emits the engine line to the log as well as the summary' {
+            $logEmit      = $text.IndexOf('Write-Host ($ttLine')
+            $summaryGuard = $text.IndexOf('if ($env:GITHUB_STEP_SUMMARY)')
+
+            $logEmit | Should -BeGreaterThan -1 -Because 'the summary is unreadable by any API'
+            $summaryGuard | Should -BeGreaterThan -1
+            $logEmit | Should -BeLessThan $summaryGuard -Because 'inside the guard it would not reach the log'
+        }
+
+        It 'builds the log line and the summary line from one string' {
+            $text | Should -Match '\$summary \+= \$ttLine' -Because 'two independently built strings drift'
+        }
     }
 
     Context 'a self-skip says so' {
