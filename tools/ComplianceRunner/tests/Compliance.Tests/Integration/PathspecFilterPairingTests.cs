@@ -20,7 +20,7 @@ using System.Diagnostics;
 ///
 /// These tests are written to PASS against today's behaviour. They record the disagreement so
 /// it is visible in the suite. Whether the fix narrows the pathspec or widens the filter is
-/// open: BHoMBot used EndsWith("AssemblyInfo.cs") (ProjectCompliance.cs:33), so widening the
+/// open: BHoMBot's project compliance matched on EndsWith("AssemblyInfo.cs"), so widening the
 /// filter restores the older semantics, and line 20 of that same FileFilterTests file asserts
 /// the narrower one deliberately. Where an assertion would change under one of those two
 /// answers, the comment says what it should become and under which answer.

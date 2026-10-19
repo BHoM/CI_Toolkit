@@ -47,7 +47,7 @@ FIXTURE_PATHS=(
   "src/datasets/lower/low.json"          # lowercase, already matched
   "a/mydatasets.json"                    # substring in filename, already matched
   "Datasets/root-direct.json"            # root-level, e.g. CFD_Toolkit
-  "Datasets/Area/root-nested.json"       # root-level nested, e.g. BuroHappold_Datasets
+  "Datasets/Area/root-nested.json"       # root-level nested, e.g. a *_Datasets repo
   "DataSets/Caps/caps.json"              # root + capital S, e.g. LifeCycleAssessment_Toolkit
   "DATASETS/shouty/shout.json"           # upper case, defensive
   "datasets.json"                        # root-level file
@@ -65,9 +65,10 @@ FIXTURE_PATHS=(
   # for. These are BHoM versioning upgrade maps, {"Dataset":{"ToNew":..,"ToOld":..}},
   # read by BHoM_Engine Versioning_Engine/Query/DatasetToNewPaths.cs from
   # %ProgramData%\BHoM\Upgrades. They carry no _t and cannot be Dataset documents.
-  # The first is FAILING IN PRODUCTION TODAY and the exclusion below deliberately
-  # does NOT cover it.
-  "BuroHappold_Datasets/Versioning_93.json"
+  # Both sit in a project folder named *_Datasets, which is what supplies the
+  # 'datasets' substring the base selector needs, and the exclusion below
+  # deliberately does NOT cover them.
+  "Example_Datasets/Versioning_93.json"
   "BHoM_Datasets/Versioning_93.json"
   # Project-compliance inputs.
   "AssemblyInfo.cs"                      # repo root: the only thing the old token matched
@@ -278,14 +279,14 @@ else
     assert_not_matches "dataset" "$pat" ".ci/code/Versioning_Test/Datasets/9.2/Objects.json"
     assert_not_matches "dataset" "$pat" ".ci/code/Versioning_Test/Datasets/9.1/Methods.json"
     # CHARACTERISATION, NOT APPROVAL. The project-directory case is still selected,
-    # and the first of these is a live production failure. Asserted positively for
-    # two reasons: it proves the exclusion above is one directory layout rather than
+    # and this layout has occurred in practice. Asserted positively for two
+    # reasons: it proves the exclusion above is one directory layout rather than
     # a class-wide "stop checking non-datasets", and it means anyone who later widens
     # the pattern into this case, or re-anchors the selector onto the data directory,
     # has to flip a visible assertion instead of changing fleet-wide scope silently.
     # If you are here because you re-anchored the selector: flipping these two to
     # assert_not_matches is the intended outcome, not a regression.
-    assert_matches     "dataset" "$pat" "BuroHappold_Datasets/Versioning_93.json"
+    assert_matches     "dataset" "$pat" "Example_Datasets/Versioning_93.json"
     assert_matches     "dataset" "$pat" "BHoM_Datasets/Versioning_93.json"
   done <<< "$dataset_patterns"
 fi
@@ -323,7 +324,7 @@ else
   # project-directory case was ever in scope here. Asserted so that re-anchoring
   # this pattern cannot silently pull them in.
   assert_not_matches "dataset-tests" "$dt_pattern" ".ci/code/Versioning_Test/Datasets/9.2/Objects.json"
-  assert_not_matches "dataset-tests" "$dt_pattern" "BuroHappold_Datasets/Versioning_93.json"
+  assert_not_matches "dataset-tests" "$dt_pattern" "Example_Datasets/Versioning_93.json"
   assert_not_matches "dataset-tests" "$dt_pattern" "BHoM_Datasets/Versioning_93.json"
 
   # The two patterns must stay distinct. If someone re-unifies them this fails.
@@ -375,7 +376,8 @@ ver_pattern=$(grep -h "^[[:space:]]*patterns:" \
 if [ -z "$ver_pattern" ]; then
   fail "ci-versioning: no pattern found"
 else
-  # Mirrors BHoMBot Versioning.cs:49. One consumer now: the skip decision
+  # Mirrors BHoMBot, whose versioning check excluded AssemblyInfo.cs the same
+  # way. One consumer now: the skip decision
   # (count). It previously also fed the deletion-only guard in
   # Assert-VersioningPrerequisites.ps1, but that fast-fail was removed on
   # 2026-08-07 because its expected set was the whole installer payload while

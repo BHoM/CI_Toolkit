@@ -20,9 +20,9 @@ function Select-AltConfigs {
 
         - Real altConfigs.txt files carry both. Every Revit-family repo sampled lists
           five Debug20NN and five Release20NN entries.
-        - The installer ships Release* only. BuroHappold_Installer's own
-          IncludedRepos/altConfigs.txt contains Release entries exclusively, no Debug.
-          So building Debug20NN in CI verifies configurations that are never shipped.
+        - The installer ships Release* only. Its own IncludedRepos/altConfigs.txt
+          contains Release entries exclusively, no Debug. So building Debug20NN in
+          CI verifies configurations that are never shipped.
         - resolve-dependencies already filters the same way for dependency repos
           (Build-Dependencies.ps1), and caller Debug builds succeeded in production
           against a Release-only dependency closure, so the two sides were not

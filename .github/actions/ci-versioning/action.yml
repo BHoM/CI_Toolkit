@@ -86,10 +86,10 @@ runs:
       id: changed
       uses: BHoM/CI_Toolkit/.github/actions/compute-changed-files@develop
       with:
-        # AssemblyInfo.cs is excluded to match BHoMBot's Versioning.cs:49: a
-        # milestone version bump touches it fleet-wide and cannot change the
-        # outcome, because the result is a function of the built assemblies and
-        # the datasets, not of the file that changed. Same exclusion as
+        # AssemblyInfo.cs is excluded to match BHoMBot's versioning check, which
+        # skipped it too: a milestone version bump touches it fleet-wide and cannot
+        # change the outcome, because the result is a function of the built
+        # assemblies and the datasets, not of the file that changed. Same exclusion as
         # ci-serialisation. The token is wildcarded so it matches at any depth;
         # a bare 'AssemblyInfo.cs' would anchor to the repo root and match
         # nothing (see tests/test-changed-file-patterns.sh).
@@ -246,9 +246,9 @@ runs:
     # canonical DLL in it was present in ProgramData. It was removed 2026-08-07 as a
     # latent fleet-wide outage, on two measurements:
     #
-    #   1. It had never executed. Zero of the last 100 BHoM/BHoM_Installer releases and
-    #      zero of the last 30 BuroHappoldEngineering/BuroHappold_Installer releases
-    #      carry IncludedDLLs.txt, so all eight prod runs sampled that day logged
+    #   1. It had never executed. Zero of the last 100 BHoM/BHoM_Installer releases,
+    #      and zero of the last 30 from the other installer, carry IncludedDLLs.txt,
+    #      so all eight prod runs sampled that day logged
     #      "No release carrying IncludedDLLs.txt ... Skipping fast-fail".
     #   2. Had a baseline ever appeared it would have failed almost every repo. The
     #      expected set is the whole installer payload (measured: 165 canonical DLLs,

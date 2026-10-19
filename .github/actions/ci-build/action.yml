@@ -31,7 +31,8 @@ runs:
       uses: BHoM/CI_Toolkit/.github/actions/compute-changed-files@develop
       with:
         # :(exclude)*AssemblyInfo.cs matches ci-versioning and ci-serialisation, and
-        # matches what BHoMBot's core check did (Checks/Core.cs:30).
+        # matches BHoMBot's core check, which excluded AssemblyInfo.cs from the
+        # changed-file set the same way.
         #
         # It is inert today, and is here for consistency rather than for effect. Two
         # measurements, both worth recording so nobody reads this as protection against
