@@ -72,7 +72,7 @@ class ComplianceRunner
                         resultForThisFile = BH.Engine.Test.CodeCompliance.Compute.CheckAssemblyInfo(file, orgUrl);
 
                     // Remap absolute location paths back to the relative file path so
-                    // annotations point to the correct diff line, mirroring BHoMBot ProjectCompliance.cs.
+                    // annotations point to the correct diff line, mirroring BHoMBot's project check.
                     // Note: .OfType<Error>() silently drops any ITestInformation that is not exactly
                     // BH.oM.Test.CodeCompliance.Error. Currently safe, because the project engine only emits
                     // Error-typed findings, but revisit if new finding sub-types are introduced.
@@ -104,7 +104,7 @@ class ComplianceRunner
                     resultForThisFile = BH.Engine.Test.CodeCompliance.Compute.RunChecks(file.Replace('/', '\\'), checkType);
 
                     // Group findings one-per-line and remap the path to the diff-relative file,
-                    // mirroring BHoMBot's GroupInformation -> GroupErrors pipeline (code/copyright/
+                    // mirroring how BHoMBot grouped findings and then remapped them (code/copyright/
                     // documentation only; project has its own remap above). GroupErrors concatenates
                     // each finding's FullMessage() into the grouped Error.Message, so downstream these
                     // annotations are built from that message directly (see the preformatted branch in
@@ -139,7 +139,7 @@ class ComplianceRunner
                 //
                 // Project findings use IFullMessage, which appends the " - For more information
                 // see <url>" documentation suffix. This is a deliberate, documented divergence from
-                // BHoMBot: BHoMBot's ProjectCompliance emitted the bare Error.Message with no suffix,
+                // BHoMBot, whose project check emitted the bare Error.Message with no suffix,
                 // even though it carried the DocumentationLink. Every other compliance check surfaces
                 // that link (via GroupErrors -> FullMessage), and the project engine attaches a
                 // DocumentationLink to every finding specifically so it can be shown, so BHoMBot's

@@ -996,11 +996,11 @@ public static class RunCommand
 
     // Some failures record no type-level cause at all, because the type that cannot be
     // resolved is in the method's signature rather than in the deserialised payload.
-    // Measured: BH.Revit.Engine.MechanicalPlumbing.Create.DuctLogicalOrFilter(bool,bool,bool)
-    // exists with exactly the recorded signature, so it is not a regression, but its return
-    // type is Autodesk.Revit.DB.LogicalOrFilter and the MethodInfo cannot be materialised
-    // without RevitAPI. Probe the signature and report the blocker only when it is
-    // positively observed and outside BHoM; anything else stays a real failure.
+    // The shape seen in practice is a Revit engine method that exists with exactly the
+    // recorded signature, so it is not a regression, but whose return type comes from
+    // Autodesk.Revit.DB, so the MethodInfo cannot be materialised without RevitAPI.
+    // Probe the signature and report the blocker only when it is positively observed
+    // and outside BHoM; anything else stays a real failure.
     // Resolves the declaring type, then either probes its signature or explains why it could
     // not be resolved.
     //

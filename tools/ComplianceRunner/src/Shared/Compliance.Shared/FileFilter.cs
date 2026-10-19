@@ -34,7 +34,7 @@ public static class FileFilter
     /// </summary>
     /// <remarks>
     /// The directory test is anchored on a whole path segment. It used to ask whether the
-    /// lowercased path contained "datasets" anywhere, which is BHoMBot's DatasetCompliance
+    /// lowercased path contained "datasets" anywhere, which is BHoMBot's dataset
     /// filter, <c>x.ToLower().Contains("datasets") &amp;&amp; x.EndsWith(".json")</c>. That
     /// selects a file because of a project directory named *_Datasets, which holds code rather
     /// than datasets: both dataset repositories carry one beside the real Datasets directory,

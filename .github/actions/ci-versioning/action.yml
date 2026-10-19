@@ -258,8 +258,8 @@ runs:
     #      ETABS_Adapter.dll. Each repo also gets its own resolve-dependencies cache
     #      key, so nothing accumulates across repos.
     #
-    # It worked on BHoMBot only because CloneInstaller builds the entire installer set
-    # before versioning, making its ProgramData fleet-complete. That precondition does
+    # It worked on BHoMBot only because it builds the entire installer set before
+    # versioning, making its ProgramData fleet-complete. That precondition does
     # not hold in per-repo CI, which is the same mistake as the old 3-segment
     # attribution filter and the Revit mock closure dependency.
     #
@@ -356,8 +356,8 @@ runs:
         # Ordering matters twice. After resolve-dependencies, because that action saves
         # the ProgramData cache with an explicit save step, so anything written here
         # cannot leak into the cached assembly set other checks restore. Before
-        # Verification.sln, matching BHoMBot's CloneInstaller.cs, which places the mocks
-        # ahead of the versioning build so [PreviousVersion] attributes are scraped.
+        # Verification.sln, matching BHoMBot, which places the mocks ahead of the
+        # versioning build so [PreviousVersion] attributes are scraped.
         #
         # Every failure path is a soft skip: without mocks the check still runs and
         # reports those methods as unverified, which is the pre-existing behaviour. A
@@ -458,9 +458,8 @@ runs:
         #
         # Re-run the same command the csproj runs, from the same working directory,
         # differing only in when: after this repo's build and after the Revit mocks, so
-        # the scrape sees both. BHoMBot gets this for free because CloneInstaller builds
-        # the whole installer set before rebuilding Versioning_Toolkit ("just to be
-        # safe"). Re-running is safe: CollectMethodVersioning keys entries on the old
+        # the scrape sees both. BHoMBot gets this for free because it builds the whole
+        # installer set before rebuilding Versioning_Toolkit ("just to be safe"). Re-running is safe: CollectMethodVersioning keys entries on the old
         # signature and replaces a same-key entry, so this refreshes rather than
         # duplicating. Note it only collects attributes whose FromVersion equals
         # PostBuild.exe's own FileVersion truncated to two segments, so an attribute
@@ -540,8 +539,8 @@ runs:
         # test was ignored, so a declared rename or a MessageForDeleted entry did not
         # count and the check failed a repo that followed the documented convention.
         # BHoMBot is immune for the same reason it escaped the attribute-ordering defect:
-        # CloneInstaller puts every repo, subject included, in one folder, so its
-        # '..\..\' root already contains the subject.
+        # it puts every repo, subject included, in one folder, so its '..\..\' root
+        # already contains the subject.
         #
         # The exe is pointed at the workspace's PARENT, because the glob needs the repo
         # directory to be the first level. resolve-dependencies also junctions each

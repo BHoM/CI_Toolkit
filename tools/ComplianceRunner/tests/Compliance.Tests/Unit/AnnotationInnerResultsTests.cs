@@ -74,7 +74,7 @@ public class AnnotationInnerResultsTests
             "a 501-entry fixture with one failure must not produce a multi-kilobyte message");
     }
 
-    // A Pass-status finding still has to render its own message. DatasetCompliance surfaces
+    // A Pass-status finding still has to render its own message. The dataset check surfaces
     // dataset provenance that way, and FullMessage returns "" for a result less severe than the
     // floor it is given, so the floor cannot be raised unconditionally.
     [Test]

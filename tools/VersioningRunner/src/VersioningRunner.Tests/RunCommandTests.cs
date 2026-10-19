@@ -405,7 +405,7 @@ namespace VersioningRunner.Tests
             // BH.oM.Adapters and attributed every adapter's types to every repo.
             var subject = Namespaces("BH.oM.Adapters.File");
             Assert.False(RunCommand.IsFromSubjectNamespace("BH.oM.Adapters.ETABS.Elements.Pier", subject));
-            Assert.False(RunCommand.IsFromSubjectNamespace("BH.oM.Adapters.Sharepoint.File", subject));
+            Assert.False(RunCommand.IsFromSubjectNamespace("BH.oM.Adapters.Example.File", subject));
             Assert.False(RunCommand.IsFromSubjectNamespace("BH.oM.Structure.Elements.Bar", subject));
         }
 
@@ -668,9 +668,9 @@ namespace VersioningRunner.Tests
         [Fact]
         public void UnknownShapeWithUnknownVersion_StillYieldsTheBareType()
         {
-            Assert.Equal("BH.oM.Adapters.Sharepoint.Requests.OrCondition",
+            Assert.Equal("BH.oM.Adapters.Example.Requests.OrCondition",
                 RunCommand.NamedFailingType(
-                    "The type BH.oM.Adapters.Sharepoint.Requests.OrCondition from version unknown is unknown -> data returned as custom objects."));
+                    "The type BH.oM.Adapters.Example.Requests.OrCondition from version unknown is unknown -> data returned as custom objects."));
         }
 
         [Fact]
