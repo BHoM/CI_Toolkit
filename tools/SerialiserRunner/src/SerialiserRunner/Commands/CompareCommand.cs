@@ -93,7 +93,7 @@ public static class CompareCommand
         return branch.All(b => main.Any(m => m.Description == b.Description));
     }
 
-    // BHoMBot Serialisation.InformationIsLessAndBetter: strictly fewer entries than
+    // Matches BHoMBot's strict-improvement rule: strictly fewer entries than
     // the baseline AND every branch failure's Description exists on the baseline.
     private static bool InformationIsLessAndBetter(List<FailureInfo> main, List<FailureInfo> branch)
     {
