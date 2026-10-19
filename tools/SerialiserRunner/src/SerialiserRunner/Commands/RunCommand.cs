@@ -129,9 +129,8 @@ public static class RunCommand
             catch (Exception ex)
             {
                 // A Verify method that throws contributes zero failures, so the run is
-                // incomplete and must fail. BHoMBot swallows this silently
-                // (SerialiserProcess/Program.cs HandleFile) and that is exactly how 1113
-                // object types went unverified under a green check.
+                // incomplete and must fail. BHoMBot swallows this silently, and that is
+                // exactly how 1113 object types went unverified under a green check.
                 //
                 // Record it and carry on rather than returning here. Returning discarded
                 // every failure, Event and population count the other Verify methods had

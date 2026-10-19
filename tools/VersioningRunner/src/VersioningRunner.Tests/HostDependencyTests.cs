@@ -21,14 +21,11 @@ namespace VersioningRunner.Tests
         // is silently discarded: the check reports a green it has not earned, which is
         // the exact failure shape this whole check was rebuilt to remove.
         //
-        // Measured against the real 547-assembly closure with the Revit mocks present,
-        // so the WPF cause is isolated from the RevitAPIUI one:
-        //   Revit_MechanicalPlumbing   net8.0: 115 null, 35 unreadable, 15 namespaces
-        //                              net8.0-windows: 0, 0, 17
-        //   Revit_ElementRelationships net8.0: 95 null, 20 unreadable, 4 namespaces
-        //                              net8.0-windows: 0, 0, 5
-        //   Revit_Tagging              net8.0: 75 null, 10 unreadable, 7 namespaces
-        //                              net8.0-windows: 0, 0, 8
+        // Measured on a real closure with the Revit mocks present, which isolates the
+        // WPF cause from the RevitAPIUI one. Every Revit tool's UI assembly reported
+        // most of its types as null on net8.0 and a further tranche as unreadable;
+        // on net8.0-windows the same assemblies reported none of either and gained
+        // namespaces. The project file carries the same reasoning for the TFM itself.
         //
         // Loaded by name rather than referenced in code, so this fails rather than
         // refusing to compile if the TFM is reverted.

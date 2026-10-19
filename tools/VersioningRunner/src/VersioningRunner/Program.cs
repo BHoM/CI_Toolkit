@@ -60,7 +60,7 @@ string? vcFile = GetArg(args, "--version-conditional");
 // The distinction matters for most of the fleet, not an edge case: 75 of the 92 alpha and
 // beta repos are non-Revit and will legitimately produce an empty list. Treating empty as
 // "no evidence" would leave every versioning divergence on those repos unscored, and the
-// gate in CI_Toolkit#173 could never be satisfied for them.
+// scoring gate could never be satisfied for them.
 IReadOnlyCollection<string>? versionConditional = null;
 if (vcFile is not null && File.Exists(vcFile))
 {

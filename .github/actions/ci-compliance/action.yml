@@ -177,6 +177,29 @@ runs:
         $runnerOutput | ForEach-Object { Write-Host $_ }
         Write-Host "::endgroup::"
 
+        # Which engine produced this verdict. resolve-dependencies already records it, in a
+        # dependency table further up the job, and someone diagnosing a red is looking here.
+        # A compliance failure is nearly always either the file or the rules, and nothing
+        # else on this surface names the rules. The rules track Test_Toolkit's branch by
+        # decision rather than by default, so the version has to be visible instead.
+        #
+        # Built once and emitted twice, deliberately. The job summary is the right place for
+        # a human, but GitHub exposes no API for job summaries, so a line written only there
+        # can never be read back and any claim resting on it stays derived. The log can be
+        # fetched. Keep both, and keep them built from one string so they cannot drift.
+        $ttSha = '${{ steps.tt-sha.outputs.sha }}'
+        if ($ttSha.Length -ge 7) {
+          $ttLine = 'Rules from Test_Toolkit `' + $ttSha.Substring(0, 7) + '`.'
+        } else {
+          # Said rather than left blank. An absent SHA means the dependency metadata did not
+          # record it, which also means the runner cache key lost its Test_Toolkit component
+          # on this run, so it is worth seeing rather than reading as "no engine involved".
+          $ttLine = 'Rules from Test_Toolkit, commit not recorded.'
+        }
+
+        # Backticks are summary markdown. They are noise in a log line, so drop them there.
+        Write-Host ($ttLine -replace '`', '')
+
         if ($env:GITHUB_STEP_SUMMARY) {
           $status = if ($exitCode -eq 0) { "passed" } else { "**failed**" }
 
@@ -194,21 +217,9 @@ runs:
             $summary += $coverage
           }
 
-          # Which engine produced this verdict. resolve-dependencies already records it, in a
-          # dependency table further up the job, and someone diagnosing a red is looking here.
-          # A compliance failure is nearly always either the file or the rules, and nothing
-          # else on this surface names the rules. The rules track Test_Toolkit's branch by
-          # decision rather than by default, so the version has to be visible instead.
-          $ttSha = '${{ steps.tt-sha.outputs.sha }}'
+          # Same string as the log line above, so the two cannot disagree.
           $summary += ""
-          if ($ttSha.Length -ge 7) {
-            $summary += 'Rules from Test_Toolkit `' + $ttSha.Substring(0, 7) + '`.'
-          } else {
-            # Said rather than left blank. An absent SHA means the dependency metadata did not
-            # record it, which also means the runner cache key lost its Test_Toolkit component
-            # on this run, so it is worth seeing rather than reading as "no engine involved".
-            $summary += "Rules from Test_Toolkit, commit not recorded."
-          }
+          $summary += $ttLine
 
           $summary | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
         }

@@ -44,8 +44,8 @@ public static class CompareCommand
                 IsBaselineUnusable: true);
 
         // Legacy comparison is COUNT-aware (List semantics), keyed on each failing
-        // entry's Description. Reproduced verbatim from BHoMBot's
-        // InformationIsEqual / InformationIsLessAndBetter (see the two helpers).
+        // entry's Description. Reproduced verbatim from BHoMBot's two comparison
+        // rules, equality and strict improvement (see the two helpers below).
         List<FailureInfo> main = baseline.Failures;
         List<FailureInfo> branchInfo = branch.Failures;
 
@@ -84,7 +84,7 @@ public static class CompareCommand
         return new CompareResult(true, summary);
     }
 
-    // BHoMBot Serialisation.InformationIsEqual: equal entry count AND every branch
+    // Matches BHoMBot's equality rule: equal entry count AND every branch
     // failure's Description exists on the baseline (existence, not multiplicity).
     private static bool InformationIsEqual(List<FailureInfo> main, List<FailureInfo> branch)
     {
@@ -93,7 +93,7 @@ public static class CompareCommand
         return branch.All(b => main.Any(m => m.Description == b.Description));
     }
 
-    // BHoMBot Serialisation.InformationIsLessAndBetter: strictly fewer entries than
+    // Matches BHoMBot's strict-improvement rule: strictly fewer entries than
     // the baseline AND every branch failure's Description exists on the baseline.
     private static bool InformationIsLessAndBetter(List<FailureInfo> main, List<FailureInfo> branch)
     {

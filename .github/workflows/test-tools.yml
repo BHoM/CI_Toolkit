@@ -3,8 +3,9 @@
 # lint-workflows covers the YAML and the bash pathspec suite, but its paths filter
 # lists only .github/workflows, .github/actions, .github/scripts and templates. Nothing
 # matched tools/**, so a pull request touching only the runners received no checks at
-# all: PR #131 reported zero. That left every runner regression test inert, including the
-# one added in #131 to stop the System.Drawing.Common reference being dropped as unused.
+# all: one such pull request reported zero checks. That left every runner regression test
+# inert, including the one added to stop the System.Drawing.Common reference being
+# dropped as unused.
 #
 # Two jobs and two ComplianceRunner test projects, deliberately separate.
 #

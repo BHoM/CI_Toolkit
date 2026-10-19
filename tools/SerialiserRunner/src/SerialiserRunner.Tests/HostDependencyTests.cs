@@ -26,8 +26,8 @@ namespace SerialiserRunner.Tests
         // Revit_X_oM_20NN reaches PresentationCore, and BH.oM.Forms reaches System.Windows.Forms.
         // On a plain net8.0 host those resolve to nothing, so asm.GetTypes() throws
         // ReflectionTypeLoadException, BHoM_Engine's ExtractTypes swallows it, and the entire
-        // assembly registers zero types. Measured: 41 types in Revit_MechanicalPlumbing_oM_2022,
-        // 4 unloadable, 0 registered. Under net8.0-windows the same assembly returns all 41.
+        // assembly registers zero types. Measured on one year-suffixed Revit oM assembly:
+        // 41 types, 4 unloadable, 0 registered. Under net8.0-windows it returns all 41.
         //
         // Loaded by name so this fails rather than refusing to compile if the TFM is reverted.
         [Theory]

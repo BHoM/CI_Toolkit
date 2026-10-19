@@ -15,7 +15,7 @@ class DatasetComplianceRunner
         //                              <file1.json> [file2.json ...]
         //
         // Only processes .json files whose path contains "datasets" (case-insensitive),
-        // mirroring BHoMBot's DatasetCompliance filtering.
+        // mirroring BHoMBot's dataset filtering.
         var (outputFormat, sarifFilePath, files) = ArgParser.ParseDataset(args);
         if (files == null || files.Count == 0)
         {

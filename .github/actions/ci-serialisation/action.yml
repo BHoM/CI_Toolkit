@@ -72,8 +72,8 @@ runs:
       id: changed
       uses: BHoM/CI_Toolkit/.github/actions/compute-changed-files@develop
       with:
-        # AssemblyInfo.cs is excluded to match BHoMBot's serialisation gate
-        # (Serialisation.cs:35). A version bump cannot change the verdict: the
+        # AssemblyInfo.cs is excluded to match BHoMBot's serialisation gate, which
+        # skipped it for the same reason. A version bump cannot change the verdict: the
         # comparator keys on IToText, which carries no assembly version, and the
         # round trip happens within a single run. .csproj stays in, unlike
         # BHoMBot, because a project file can add a reference and so genuinely
@@ -117,7 +117,7 @@ runs:
       if: steps.changed.outputs.count != '0'
       shell: pwsh
       run: |
-        # -clp:ErrorsOnly, as #179 applied to dependency builds: this build is a means
+        # -clp:ErrorsOnly, as on dependency builds: this build is a means
         # to an end and its compiler warnings would otherwise become annotations on a
         # serialisation check. ci-build is where build warnings belong.
         dotnet restore "${{ steps.solution.outputs.path }}"

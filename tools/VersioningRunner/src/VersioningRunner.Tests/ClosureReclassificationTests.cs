@@ -12,8 +12,8 @@ namespace VersioningRunner.Tests
     // the closure explicitly so the rule is actually exercised.
     public class ClosureReclassificationTests
     {
-        private const string ModelQaEvent =
-            "Method TryGetValueFromSource from { \"_t\" : \"System.Type\", \"Name\" : \"BH.Revit.Engine.Core.Compute, Revit_ModelQA_Engine_2022, Version=9.0.0.0, Culture=neutral, PublicKeyToken=null\", \"_bhomVersion\" : \"9.2\" } failed to deserialise.";
+        private const string ForeignAsmEvent =
+            "Method TryGetValueFromSource from { \"_t\" : \"System.Type\", \"Name\" : \"BH.Revit.Engine.Core.Compute, Example_Foreign_Engine_2022, Version=9.0.0.0, Culture=neutral, PublicKeyToken=null\", \"_bhomVersion\" : \"9.2\" } failed to deserialise.";
 
         private const string Config2024Event =
             "Method ProjectParameter from { \"_t\" : \"System.Type\", \"Name\" : \"BH.Revit.Engine.Core.Create, Revit_Core_Engine_2024, Version=9.0.0.0, Culture=neutral, PublicKeyToken=null\", \"_bhomVersion\" : \"9.2\" } failed to deserialise.";
@@ -71,7 +71,7 @@ namespace VersioningRunner.Tests
         public void ForeignAssemblyAnsweredByAnother_IsUnverified()
         {
             var (result, d) = Run(
-                Tree("BH.Revit.Engine.Core.Compute.TryGetValueFromSource", ModelQaEvent),
+                Tree("BH.Revit.Engine.Core.Compute.TryGetValueFromSource", ForeignAsmEvent),
                 Answered("Revit_Core_Engine_2022"),
                 Closure(loaded: ["Revit_Core_Engine_2022"], subject: ["Revit_Core_Engine_2022", "Revit_oM"]));
 
@@ -127,7 +127,7 @@ namespace VersioningRunner.Tests
         public void NoClosureSupplied_IsUntouched()
         {
             var (result, d) = Run(
-                Tree("BH.Revit.Engine.Core.Compute.TryGetValueFromSource", ModelQaEvent),
+                Tree("BH.Revit.Engine.Core.Compute.TryGetValueFromSource", ForeignAsmEvent),
                 Answered("Revit_Core_Engine_2022"),
                 closure: null);
 
@@ -154,7 +154,7 @@ namespace VersioningRunner.Tests
         public void AlreadyUnverified_IsNotRelabelled()
         {
             var (result, d) = Run(
-                Tree("BH.Revit.Engine.Core.Compute.TryGetValueFromSource", ModelQaEvent),
+                Tree("BH.Revit.Engine.Core.Compute.TryGetValueFromSource", ForeignAsmEvent),
                 (_, _, _) => ("RevitAPI", ClassificationPath.SignatureBlockerOutsideBHoM, new[] { "Revit_Core_Engine_2022" }),
                 Closure(loaded: ["Revit_Core_Engine_2022"], subject: ["Revit_Core_Engine_2022"]));
 
@@ -184,11 +184,11 @@ namespace VersioningRunner.Tests
         public void MultipleMethodEvents_TheFirstNamedAssemblyDecides()
         {
             var (result, d) = Run(
-                Tree("BH.Revit.Engine.Core.Compute.TryGetValueFromSource", ModelQaEvent, SubjectAsmEvent),
+                Tree("BH.Revit.Engine.Core.Compute.TryGetValueFromSource", ForeignAsmEvent, SubjectAsmEvent),
                 Answered("Revit_Core_Engine_2022"),
                 Closure(loaded: ["Revit_Core_Engine_2022"], subject: ["Revit_Core_Engine_2022"]));
 
-            Assert.Equal("Revit_ModelQA_Engine_2022", d.DeclaringAssembly);
+            Assert.Equal("Example_Foreign_Engine_2022", d.DeclaringAssembly);
             Assert.Equal(0, result.FailureCount);
             Assert.Equal(ClassificationPath.ForeignDeclaringAssembly, d.Path);
         }

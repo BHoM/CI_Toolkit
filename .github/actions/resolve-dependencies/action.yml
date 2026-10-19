@@ -258,7 +258,7 @@ runs:
       shell: pwsh
       run: |
         # Junctions D:\a\<Repo>\<DepName> -> C:\bhom-deps\<DepName> so relative
-        # HintPaths in .csproj files (e.g. ..\..\Revit_UI\libs\...) resolve
+        # HintPaths in .csproj files (e.g. ..\..\<DepName>\libs\...) resolve
         # when building the caller. No-op for repos without such paths.
         $workspaceParent = Split-Path $env:GITHUB_WORKSPACE
         foreach ($dep in Get-ChildItem "C:\bhom-deps" -Directory -ErrorAction SilentlyContinue) {

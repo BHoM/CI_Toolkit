@@ -41,9 +41,9 @@ public class FileFilterTests
         [TestCase("DataSets/foo.json",        ExpectedResult = true)]  // root-level, mixed case
         [TestCase("DataSets/LCA/deep/x.json", ExpectedResult = true)]  // root-level, nested
 
-        // Versioning upgrade maps. The live case is a project directory supplying the
-        // "datasets" substring, which is how BuroHappold_Datasets/Versioning_93.json and
-        // BHoM_Datasets/Versioning_100.json get selected at all.
+        // Versioning upgrade maps. The case seen in practice is a project directory
+        // supplying the "datasets" substring, which is how Example_Datasets/Versioning_93.json
+        // and BHoM_Datasets/Versioning_100.json get selected at all.
         [TestCase("BHoM_Datasets/Versioning_93.json",        ExpectedResult = false)]
         [TestCase("BHoM_Datasets/Versioning_100.json",       ExpectedResult = false)]
         [TestCase(@"BHoM_Datasets\Versioning_93.json",       ExpectedResult = false)] // backslash separators
@@ -76,9 +76,9 @@ public class FileFilterTests
 
         // The anchoring. A project directory named *_Datasets supplies the substring and holds
         // code, not datasets; both dataset repositories carry one beside the real Datasets
-        // directory. These are the #43 cases stated without relying on the upgrade-map rule,
-        // so a failure here says the anchoring moved rather than the name test.
-        [TestCase("BuroHappold_Datasets/Rules.json",         ExpectedResult = false)]
+        // directory. These state that case without relying on the upgrade-map rule, so a
+        // failure here says the anchoring moved rather than the name test.
+        [TestCase("Example_Datasets/Rules.json",             ExpectedResult = false)]
         [TestCase("BHoM_Datasets/Anything.json",             ExpectedResult = false)]
         [TestCase(@"BHoM_Datasets\Anything.json",            ExpectedResult = false)] // backslash separators
         [TestCase("mydatasets/foo.json",                     ExpectedResult = false)]
@@ -102,10 +102,10 @@ public class FileFilterTests
         // The upgrade-map rule on its own, so a failure says which of the two predicates moved.
         // These paths carry no "datasets" substring, so IsDatasetFile rejects them anyway and
         // could not distinguish the two.
-        [TestCase("Tagging_oM/Versioning_93.json",  ExpectedResult = true)]
-        [TestCase("Tagging_oM/Versioning_Rules.json", ExpectedResult = false)]
-        [TestCase("Versioning_93.json",             ExpectedResult = true)]  // no directory at all
-        [TestCase("Structure_oM/Versioning_93.txt", ExpectedResult = true)]  // extension is IsDatasetFile's job
+        [TestCase("Structure_oM/Versioning_93.json",    ExpectedResult = true)]
+        [TestCase("Structure_oM/Versioning_Rules.json", ExpectedResult = false)]
+        [TestCase("Versioning_93.json",                 ExpectedResult = true)]  // no directory at all
+        [TestCase("Structure_oM/Versioning_93.txt",     ExpectedResult = true)]  // extension is IsDatasetFile's job
         public bool IsVersioningUpgradeMap(string file)
             => FileFilter.IsVersioningUpgradeMap(file);
     }

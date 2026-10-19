@@ -237,7 +237,7 @@ public static class RunCommand
                     + "from a namespace prefix, which cannot separate this repository's types from those of repositories "
                     + $"extending its namespace. Of those, {unresolvable} were separately unverifiable because the closure "
                     + $"could not resolve a type they need and are reported under that cause; {unattributable} rest on the "
-                    + "inference alone. None of them gate. See BHoM/internal-tickets#31.");
+                    + "inference alone. None of them gate.");
             }
         }
 
@@ -318,7 +318,7 @@ public static class RunCommand
         if (ambiguous > 0)
             Console.Error.WriteLine(
                 $"::warning title=Versioning::{ambiguous} finding(s) have a declaring type present in more than one loaded assembly, " +
-                "so their classification depended on assembly enumeration order. See CI_Toolkit#161.");
+                "so their classification depended on assembly enumeration order.");
 
         const int maxLogged = 50;
         foreach (var failure in result.Failures.Take(maxLogged))
@@ -411,9 +411,10 @@ public static class RunCommand
     // ProbeDeclaringType walks the loaded list and takes its verdict from the FIRST
     // assembly that yields the declaring type. Where two repos declare the same type,
     // whichever is enumerated first decides whether the finding reads as a genuine
-    // regression or as an infrastructure problem. That is CI_Toolkit#161's mechanism:
-    // BH.Revit.Engine.Core.Compute is defined by both Revit_Core_Engine and
-    // Revit_ModelQA_Engine, and 42 such type-level collisions exist across the fleet.
+    // regression or as an infrastructure problem. That is the ambiguity's mechanism:
+    // BH.Revit.Engine.Core.Compute is defined by Revit_Core_Engine and by a second
+    // engine assembly in another repository, and dozens of such type-level collisions
+    // exist across the fleet.
     //
     // Directory.GetFiles documents no ordering. Measured on windows-2025-vs2026 across
     // four cold-rebuild runs on separate runners, NTFS returned exactly
@@ -659,9 +660,9 @@ public static class RunCommand
             // prefix is genuinely all the evidence there is on that path.
             //
             // No namespace rule can be made correct here, so precision is not the fix:
-            // BH.oM.Structure.Elements is declared by both BHoM/BHoM and
-            // StructuralEngineering_Toolkit, and a string cannot say which of two repos
-            // sharing a namespace owns a type. Measured on BHoM/BHoM (run 33849699768,
+            // BH.oM.Structure.Elements is declared by BHoM/BHoM and by a downstream
+            // toolkit as well, and a string cannot say which of two repos sharing a
+            // namespace owns a type. Measured on BHoM/BHoM (run 33849699768,
             // commit d6db0a1): 145 of 145 findings arrived on this path and 0 by declaring
             // assembly, and 145 of 145 turned out to be another repository's or an artefact
             // of an incomplete closure. Re-running the same subject against a closure with
@@ -671,7 +672,7 @@ public static class RunCommand
             // Routed to the unverified bucket rather than dropped, because dropping would
             // lose a real regression that happens to sit on this path. DeriveStatus then
             // yields Warning and ExitCodeFor yields 0: still in the log, still in the
-            // artefact, no longer a gate. See BHoM/internal-tickets#31.
+            // artefact, no longer a gate.
             if (cause is null && attributedBy == AttributionBasis.NamespaceFallback)
                 cause = "ownership inferred from a namespace prefix, because the dataset "
                     + "record named no declaring assembly, so this finding may belong to "
@@ -822,7 +823,7 @@ public static class RunCommand
                 // provisioning soft-skips, the same shape recurs against RevitAPIUI:
                 // measured on BHoM/Revit_Toolkit, 120 unreadable types led by
                 // Revit_Core_Adapter_2022 failing to resolve RevitAPIUI. That one is
-                // tracked as issue #143 and is not fixed here.
+                // tracked separately and is not fixed here.
                 try
                 {
                     if (type.Namespace is { Length: > 0 } ns)
@@ -944,8 +945,8 @@ public static class RunCommand
         return false;
     }
 
-    // "Method DuctLogicalOrFilter from { "_t" : "System.Type", "Name" : "BH.Revit.Engine
-    //  .MechanicalPlumbing.Create, Revit_MechanicalPlumbing_Engine_2022, ..." ... } failed
+    // "Method SomeMethod from { "_t" : "System.Type", "Name" : "BH.Example.Engine
+    //  .Area.Create, Example_Area_Engine_2022, ..." ... } failed
     //  to deserialise." — the only event some failures carry. It names the method and its
     // declaring type where Description has been mangled to "...Create. }" by
     // Versioning_Toolkit's DescriptionFromJson, so it is the better label as well as the
@@ -995,11 +996,11 @@ public static class RunCommand
 
     // Some failures record no type-level cause at all, because the type that cannot be
     // resolved is in the method's signature rather than in the deserialised payload.
-    // Measured: BH.Revit.Engine.MechanicalPlumbing.Create.DuctLogicalOrFilter(bool,bool,bool)
-    // exists with exactly the recorded signature, so it is not a regression, but its return
-    // type is Autodesk.Revit.DB.LogicalOrFilter and the MethodInfo cannot be materialised
-    // without RevitAPI. Probe the signature and report the blocker only when it is
-    // positively observed and outside BHoM; anything else stays a real failure.
+    // The shape seen in practice is a Revit engine method that exists with exactly the
+    // recorded signature, so it is not a regression, but whose return type comes from
+    // Autodesk.Revit.DB, so the MethodInfo cannot be materialised without RevitAPI.
+    // Probe the signature and report the blocker only when it is positively observed
+    // and outside BHoM; anything else stays a real failure.
     // Resolves the declaring type, then either probes its signature or explains why it could
     // not be resolved.
     //
@@ -1046,7 +1047,7 @@ public static class RunCommand
     //
     // The loop used to return on the first match, which made the classification depend on
     // assembly enumeration order wherever two repos declare into the same namespace
-    // (CI_Toolkit#161, measured on BH.Revit.Engine.Core). The probe result still comes from
+    // (measured on BH.Revit.Engine.Core). The probe result still comes from
     // the first match, so behaviour is unchanged; the candidate list is recorded so a
     // classification that could have gone either way is visible rather than silent.
     internal static (string? Cause, ClassificationPath Path, IReadOnlyList<string> Candidates) ProbeDeclaringType(
@@ -1253,7 +1254,8 @@ public static class RunCommand
     // every downstream BHoM toolkit type also starts with BH.: measured on BHoM/BHoM run
     // 33849699768, all 145 findings named a BH. type and all 145 were closure artefacts.
     // Worse, the test discarded a cause the function had already computed correctly one line
-    // above, which is the same discard-at-the-handoff fault as BHoM/internal-tickets#31.
+    // above: the same discard-at-the-handoff fault as the namespace-fallback path, where a
+    // finding's real basis was computed and then thrown away before anything could report it.
     //
     // A genuine removal is still caught, and deliberately so: its namespace survives in the
     // loaded assembly the type was deleted from, so it takes the middle branch. Where a

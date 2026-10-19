@@ -10,21 +10,18 @@
       a failure in one of them cannot be attributed to the repo that owns it, so
       it is silently dropped rather than reported.
 
-      Measured against the real 547-assembly closure with the Revit mocks present,
-      so this isolates the WPF cause from the RevitAPIUI one:
+      Measured on a real closure with the Revit mocks present, which isolates the
+      WPF cause from the RevitAPIUI one. On a plain net8.0 host, every Revit
+      tool's UI assembly reported most of its types as null and a further tranche
+      as unreadable; on net8.0-windows the same assemblies reported none of
+      either and gained namespaces.
 
-        subject                     net8.0                         net8.0-windows
-        Revit_MechanicalPlumbing    115 null, 35 unreadable, 15 ns  0, 0, 17 ns
-        Revit_ElementRelationships   95 null, 20 unreadable,  4 ns  0, 0,  5 ns
-        Revit_Tagging                75 null, 10 unreadable,  7 ns  0, 0,  8 ns
+      The recovered namespaces are the UI ones, which were previously invisible
+      to attribution.
 
-      The recovered namespaces are the UI ones (e.g.
-      BH.Revit.UI.MechanicalPlumbing.Windows.Controls), which were previously
-      invisible to attribution.
-
-      This moves toward BHoMBot rather than away from it: its VersioningProcess.exe
-      is .NET Framework, where these assemblies have always resolved. The plain
-      net8.0 host was the divergence.
+      This moves toward BHoMBot rather than away from it: it runs on .NET Framework,
+      where these assemblies have always resolved. The plain net8.0 host was the
+      divergence.
     -->
     <TargetFramework>net8.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>

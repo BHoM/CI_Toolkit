@@ -86,10 +86,10 @@ runs:
       id: changed
       uses: BHoM/CI_Toolkit/.github/actions/compute-changed-files@develop
       with:
-        # AssemblyInfo.cs is excluded to match BHoMBot's Versioning.cs:49: a
-        # milestone version bump touches it fleet-wide and cannot change the
-        # outcome, because the result is a function of the built assemblies and
-        # the datasets, not of the file that changed. Same exclusion as
+        # AssemblyInfo.cs is excluded to match BHoMBot's versioning check, which
+        # skipped it too: a milestone version bump touches it fleet-wide and cannot
+        # change the outcome, because the result is a function of the built
+        # assemblies and the datasets, not of the file that changed. Same exclusion as
         # ci-serialisation. The token is wildcarded so it matches at any depth;
         # a bare 'AssemblyInfo.cs' would anchor to the repo root and match
         # nothing (see tests/test-changed-file-patterns.sh).
@@ -176,7 +176,7 @@ runs:
       if: steps.changed.outputs.count != '0'
       shell: pwsh
       run: |
-        # -clp:ErrorsOnly for the same reason as #179 on dependency builds: this build
+        # -clp:ErrorsOnly for the same reason as on dependency builds: this build
         # is a means to an end, and its compiler warnings become annotations on a
         # versioning check. Measured on BHoM/Revit_Toolkit#1683: 24 annotations, of
         # which 2 were versioning findings and 9 were 'ParameterType' is obsolete.
@@ -246,9 +246,9 @@ runs:
     # canonical DLL in it was present in ProgramData. It was removed 2026-08-07 as a
     # latent fleet-wide outage, on two measurements:
     #
-    #   1. It had never executed. Zero of the last 100 BHoM/BHoM_Installer releases and
-    #      zero of the last 30 BuroHappoldEngineering/BuroHappold_Installer releases
-    #      carry IncludedDLLs.txt, so all eight prod runs sampled that day logged
+    #   1. It had never executed. Zero of the last 100 BHoM/BHoM_Installer releases,
+    #      and zero of the last 30 from the other installer, carry IncludedDLLs.txt,
+    #      so all eight prod runs sampled that day logged
     #      "No release carrying IncludedDLLs.txt ... Skipping fast-fail".
     #   2. Had a baseline ever appeared it would have failed almost every repo. The
     #      expected set is the whole installer payload (measured: 165 canonical DLLs,
@@ -258,8 +258,8 @@ runs:
     #      ETABS_Adapter.dll. Each repo also gets its own resolve-dependencies cache
     #      key, so nothing accumulates across repos.
     #
-    # It worked on BHoMBot only because CloneInstaller builds the entire installer set
-    # before versioning, making its ProgramData fleet-complete. That precondition does
+    # It worked on BHoMBot only because it builds the entire installer set before
+    # versioning, making its ProgramData fleet-complete. That precondition does
     # not hold in per-repo CI, which is the same mistake as the old 3-segment
     # attribution filter and the Revit mock closure dependency.
     #
@@ -356,8 +356,8 @@ runs:
         # Ordering matters twice. After resolve-dependencies, because that action saves
         # the ProgramData cache with an explicit save step, so anything written here
         # cannot leak into the cached assembly set other checks restore. Before
-        # Verification.sln, matching BHoMBot's CloneInstaller.cs, which places the mocks
-        # ahead of the versioning build so [PreviousVersion] attributes are scraped.
+        # Verification.sln, matching BHoMBot, which places the mocks ahead of the
+        # versioning build so [PreviousVersion] attributes are scraped.
         #
         # Every failure path is a soft skip: without mocks the check still runs and
         # reports those methods as unverified, which is the pre-existing behaviour. A
@@ -458,9 +458,9 @@ runs:
         #
         # Re-run the same command the csproj runs, from the same working directory,
         # differing only in when: after this repo's build and after the Revit mocks, so
-        # the scrape sees both. BHoMBot gets this for free because CloneInstaller builds
-        # the whole installer set before rebuilding Versioning_Toolkit ("just to be
-        # safe"). Re-running is safe: CollectMethodVersioning keys entries on the old
+        # the scrape sees both. BHoMBot gets this for free because it builds the whole
+        # installer set before rebuilding Versioning_Toolkit ("just to be safe").
+        # Re-running is safe: CollectMethodVersioning keys entries on the old
         # signature and replaces a same-key entry, so this refreshes rather than
         # duplicating. Note it only collects attributes whose FromVersion equals
         # PostBuild.exe's own FileVersion truncated to two segments, so an attribute
@@ -540,8 +540,8 @@ runs:
         # test was ignored, so a declared rename or a MessageForDeleted entry did not
         # count and the check failed a repo that followed the documented convention.
         # BHoMBot is immune for the same reason it escaped the attribute-ordering defect:
-        # CloneInstaller puts every repo, subject included, in one folder, so its
-        # '..\..\' root already contains the subject.
+        # it puts every repo, subject included, in one folder, so its '..\..\' root
+        # already contains the subject.
         #
         # The exe is pointed at the workspace's PARENT, because the glob needs the repo
         # directory to be the first level. resolve-dependencies also junctions each
@@ -675,7 +675,7 @@ runs:
     # The failure mode is deliberately asymmetric. If this finds nothing, no file is written
     # and no flag is passed, so every finding records VersionConditional=Unknown. An empty
     # result must not read as "not version-conditional": those are different states and the
-    # register in CI_Toolkit#173 treats them differently.
+    # scoring register treats them differently.
     - name: Collect version-conditional methods
       id: vercond
       if: steps.changed.outputs.count != '0'
@@ -709,7 +709,7 @@ runs:
         # present-but-empty file is the assertion "scanned, none found", which lets the
         # runner record No. Most of the fleet is non-Revit and will land here: 75 of the 92
         # alpha and beta repos. Withholding the file for them would leave every versioning
-        # divergence unscored and the gate in CI_Toolkit#173 unsatisfiable.
+        # divergence unscored and the scoring gate unsatisfiable.
         #
         # The file is withheld only if the scan itself could not run, which is the honest
         # Unknown case.
@@ -767,7 +767,7 @@ runs:
         # An infrastructure failure and a versioning finding need different action
         # from the developer, and the job conclusion does not distinguish them. A
         # dependency build failure previously showed as a red versioning check with
-        # no indication that versioning never ran. Measured on Revit_UI#696.
+        # no indication that versioning never ran. Measured on a real pull request.
         $infraStep = ''
         if     ("${{ steps.deps.conclusion }}"          -eq 'failure') { $infraStep = 'Resolve dependencies' }
         elseif ("${{ steps.build_subject.conclusion }}" -eq 'failure') { $infraStep = 'Build primary repo' }
@@ -815,7 +815,7 @@ runs:
         # "Could not resolve it" is a closure gap: a type the record needs is absent and so
         # is its namespace, so nothing here could have supplied it. "Could not attribute it"
         # is an ownership problem: the record resolved, but ownership was inferred from a
-        # namespace prefix. Different fixes, tracked separately (internal-tickets #32, #31).
+        # namespace prefix. They need different fixes and are tracked separately.
         $unresolved = 0
         $unattributed = 0
         $coverage = $null

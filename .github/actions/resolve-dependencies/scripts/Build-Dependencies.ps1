@@ -118,7 +118,7 @@ foreach ($ownerRepo in $order) {
             Invoke-BHoMBuild -Target $solution.FullName -Config $Configuration
 
             # Build alt configurations for this dependency (Release* only, matching CI config).
-            # Required so that version-specific assemblies (e.g. Revit_UI_oM_2023.dll) exist
+            # Required so that version-specific assemblies (e.g. <Name>_oM_2023.dll) exist
             # before the caller repo builds its own alt configs.
             $depAltConfigFile = Join-Path $repoPath "altConfigs.txt"
             if (Test-Path $depAltConfigFile) {

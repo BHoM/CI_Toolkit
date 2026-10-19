@@ -31,9 +31,10 @@ public static class AnnotationConvert
     public static Annotation ToAnnotationEquivalent(this ITestInformation info, bool messageIsPreformatted = false)
     {
         var ann = new Annotation();
-        // Three-way mapping mirrors BHoMBot's AnnotationLevel.Failure / Warning / Notice.
-        // Non-Error non-Warning statuses (typically Pass with metadata, used by
-        // DatasetCompliance to surface dataset origin) become Notice, not Warning.
+        // Three-way mapping mirrors the GitHub annotation levels failure / warning /
+        // notice, which is what BHoMBot mapped onto too. Non-Error non-Warning statuses
+        // (typically Pass with metadata, used by the dataset check to surface dataset
+        // origin) become Notice, not Warning.
         ann.Level = info.Status switch
         {
             TestStatus.Error   => "failure",
@@ -79,7 +80,7 @@ public static class AnnotationConvert
     /// FullMessage uses one floor for two things: it blanks the finding's own message when the
     /// finding is less severe than the floor, and it drops inner results below it. So the floor
     /// cannot simply be raised to Warning for everything, because that would empty a Pass-level
-    /// notice, which DatasetCompliance uses to surface dataset provenance. Holding the floor at
+    /// notice, which the dataset check uses to surface dataset provenance. Holding the floor at
     /// Pass for a Pass and at Warning otherwise drops passing inner results while leaving
     /// warnings and errors intact, matching the filter DatasetTestRunner already applies to its
     /// own top level.
