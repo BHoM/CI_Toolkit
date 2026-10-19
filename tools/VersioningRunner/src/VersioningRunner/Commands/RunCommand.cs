@@ -237,7 +237,7 @@ public static class RunCommand
                     + "from a namespace prefix, which cannot separate this repository's types from those of repositories "
                     + $"extending its namespace. Of those, {unresolvable} were separately unverifiable because the closure "
                     + $"could not resolve a type they need and are reported under that cause; {unattributable} rest on the "
-                    + "inference alone. None of them gate. See BHoM/internal-tickets#31.");
+                    + "inference alone. None of them gate.");
             }
         }
 
@@ -671,7 +671,7 @@ public static class RunCommand
             // Routed to the unverified bucket rather than dropped, because dropping would
             // lose a real regression that happens to sit on this path. DeriveStatus then
             // yields Warning and ExitCodeFor yields 0: still in the log, still in the
-            // artefact, no longer a gate. See BHoM/internal-tickets#31.
+            // artefact, no longer a gate.
             if (cause is null && attributedBy == AttributionBasis.NamespaceFallback)
                 cause = "ownership inferred from a namespace prefix, because the dataset "
                     + "record named no declaring assembly, so this finding may belong to "
@@ -1253,7 +1253,8 @@ public static class RunCommand
     // every downstream BHoM toolkit type also starts with BH.: measured on BHoM/BHoM run
     // 33849699768, all 145 findings named a BH. type and all 145 were closure artefacts.
     // Worse, the test discarded a cause the function had already computed correctly one line
-    // above, which is the same discard-at-the-handoff fault as BHoM/internal-tickets#31.
+    // above: the same discard-at-the-handoff fault as the namespace-fallback path, where a
+    // finding's real basis was computed and then thrown away before anything could report it.
     //
     // A genuine removal is still caught, and deliberately so: its namespace survives in the
     // loaded assembly the type was deleted from, so it takes the middle branch. Where a
