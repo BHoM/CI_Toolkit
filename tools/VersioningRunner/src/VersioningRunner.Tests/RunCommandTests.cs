@@ -1020,7 +1020,7 @@ namespace VersioningRunner.Tests
         public void TypeInTwoLoadedAssemblies_RecordsBothCandidates()
         {
             // The same assembly listed twice stands in for two repos declaring into one
-            // namespace, which is the real shape of CI_Toolkit#161. The probe result must be
+            // namespace, which is the real shape of the ambiguity. The probe result must be
             // unchanged and the ambiguity must be visible.
             var twice = new List<Assembly> { typeof(string).Assembly, typeof(string).Assembly };
 
@@ -1176,7 +1176,7 @@ namespace VersioningRunner.Tests
             Assert.Equal(1, RunCommand.ExitCodeFor(VersioningStatus.Error));
         }
 
-        // The two observed sandbox legs of the CI_Toolkit#159 A/B, which straddle the
+        // The two observed sandbox legs of the A/B, which straddle the
         // boundary: leg A 0 failures with 805 unverified, leg B 2 real failures.
         [Theory]
         [InlineData(0, 805, VersioningStatus.Warning, 0)]

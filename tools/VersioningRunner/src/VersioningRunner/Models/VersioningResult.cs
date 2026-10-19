@@ -139,7 +139,7 @@ public record FailureDiagnostic(
     string? DeclaringAssembly,
     int EventCount,
     // Every assembly in the loaded set that yielded the declaring type. More than one
-    // means the classification depended on enumeration order (see CI_Toolkit#161).
+    // means the classification depended on enumeration order.
     IReadOnlyList<string>? DeclaringTypeCandidates = null,
     // Build configuration this run compiled, carried per row so a finding read on its
     // own is interpretable. Human-legible; it does not by itself explain a divergence.

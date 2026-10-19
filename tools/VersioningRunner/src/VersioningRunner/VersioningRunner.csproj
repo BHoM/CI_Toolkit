@@ -19,9 +19,9 @@
       The recovered namespaces are the UI ones, which were previously invisible
       to attribution.
 
-      This moves toward BHoMBot rather than away from it: its VersioningProcess.exe
-      is .NET Framework, where these assemblies have always resolved. The plain
-      net8.0 host was the divergence.
+      This moves toward BHoMBot rather than away from it: it runs on .NET Framework,
+      where these assemblies have always resolved. The plain net8.0 host was the
+      divergence.
     -->
     <TargetFramework>net8.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>

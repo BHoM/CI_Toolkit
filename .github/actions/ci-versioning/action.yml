@@ -176,7 +176,7 @@ runs:
       if: steps.changed.outputs.count != '0'
       shell: pwsh
       run: |
-        # -clp:ErrorsOnly for the same reason as #179 on dependency builds: this build
+        # -clp:ErrorsOnly for the same reason as on dependency builds: this build
         # is a means to an end, and its compiler warnings become annotations on a
         # versioning check. Measured on BHoM/Revit_Toolkit#1683: 24 annotations, of
         # which 2 were versioning findings and 9 were 'ParameterType' is obsolete.
@@ -459,7 +459,8 @@ runs:
         # Re-run the same command the csproj runs, from the same working directory,
         # differing only in when: after this repo's build and after the Revit mocks, so
         # the scrape sees both. BHoMBot gets this for free because it builds the whole
-        # installer set before rebuilding Versioning_Toolkit ("just to be safe"). Re-running is safe: CollectMethodVersioning keys entries on the old
+        # installer set before rebuilding Versioning_Toolkit ("just to be safe").
+        # Re-running is safe: CollectMethodVersioning keys entries on the old
         # signature and replaces a same-key entry, so this refreshes rather than
         # duplicating. Note it only collects attributes whose FromVersion equals
         # PostBuild.exe's own FileVersion truncated to two segments, so an attribute
@@ -674,7 +675,7 @@ runs:
     # The failure mode is deliberately asymmetric. If this finds nothing, no file is written
     # and no flag is passed, so every finding records VersionConditional=Unknown. An empty
     # result must not read as "not version-conditional": those are different states and the
-    # register in CI_Toolkit#173 treats them differently.
+    # scoring register treats them differently.
     - name: Collect version-conditional methods
       id: vercond
       if: steps.changed.outputs.count != '0'
@@ -708,7 +709,7 @@ runs:
         # present-but-empty file is the assertion "scanned, none found", which lets the
         # runner record No. Most of the fleet is non-Revit and will land here: 75 of the 92
         # alpha and beta repos. Withholding the file for them would leave every versioning
-        # divergence unscored and the gate in CI_Toolkit#173 unsatisfiable.
+        # divergence unscored and the scoring gate unsatisfiable.
         #
         # The file is withheld only if the scan itself could not run, which is the honest
         # Unknown case.

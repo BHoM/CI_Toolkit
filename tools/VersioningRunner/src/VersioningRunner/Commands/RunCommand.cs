@@ -318,7 +318,7 @@ public static class RunCommand
         if (ambiguous > 0)
             Console.Error.WriteLine(
                 $"::warning title=Versioning::{ambiguous} finding(s) have a declaring type present in more than one loaded assembly, " +
-                "so their classification depended on assembly enumeration order. See CI_Toolkit#161.");
+                "so their classification depended on assembly enumeration order.");
 
         const int maxLogged = 50;
         foreach (var failure in result.Failures.Take(maxLogged))
@@ -411,7 +411,7 @@ public static class RunCommand
     // ProbeDeclaringType walks the loaded list and takes its verdict from the FIRST
     // assembly that yields the declaring type. Where two repos declare the same type,
     // whichever is enumerated first decides whether the finding reads as a genuine
-    // regression or as an infrastructure problem. That is CI_Toolkit#161's mechanism:
+    // regression or as an infrastructure problem. That is the ambiguity's mechanism:
     // BH.Revit.Engine.Core.Compute is defined by Revit_Core_Engine and by a second
     // engine assembly in another repository, and dozens of such type-level collisions
     // exist across the fleet.
@@ -823,7 +823,7 @@ public static class RunCommand
                 // provisioning soft-skips, the same shape recurs against RevitAPIUI:
                 // measured on BHoM/Revit_Toolkit, 120 unreadable types led by
                 // Revit_Core_Adapter_2022 failing to resolve RevitAPIUI. That one is
-                // tracked as issue #143 and is not fixed here.
+                // tracked separately and is not fixed here.
                 try
                 {
                     if (type.Namespace is { Length: > 0 } ns)
@@ -1047,7 +1047,7 @@ public static class RunCommand
     //
     // The loop used to return on the first match, which made the classification depend on
     // assembly enumeration order wherever two repos declare into the same namespace
-    // (CI_Toolkit#161, measured on BH.Revit.Engine.Core). The probe result still comes from
+    // (measured on BH.Revit.Engine.Core). The probe result still comes from
     // the first match, so behaviour is unchanged; the candidate list is recorded so a
     // classification that could have gone either way is visible rather than silent.
     internal static (string? Cause, ClassificationPath Path, IReadOnlyList<string> Candidates) ProbeDeclaringType(

@@ -63,8 +63,8 @@ namespace SerialiserRunner.Tests
         }
 
         [Theory]
-        // Legacy parity: BHoMBot's SerialiserProcess.LoadAssemblies only loaded the
-        // four suffixes below. Revit year-versioned DLLs match none of them, so they
+        // Legacy parity: BHoMBot only loaded the four suffixes below when it
+        // gathered assemblies. Revit year-versioned DLLs match none of them, so they
         // are NOT loadable — matching legacy behaviour (the Revit expansion is removed).
         [InlineData(@"C:\assemblies\Revit_Toolkit2024.dll")]
         [InlineData(@"C:\assemblies\Revit_Toolkit2023.dll")]
