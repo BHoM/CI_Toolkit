@@ -1020,7 +1020,7 @@ namespace VersioningRunner.Tests
         public void TypeInTwoLoadedAssemblies_RecordsBothCandidates()
         {
             // The same assembly listed twice stands in for two repos declaring into one
-            // namespace, which is the real shape of CI_Toolkit#161. The probe result must be
+            // namespace, which is the real shape of the collision. The probe result must be
             // unchanged and the ambiguity must be visible.
             var twice = new List<Assembly> { typeof(string).Assembly, typeof(string).Assembly };
 

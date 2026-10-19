@@ -29,10 +29,14 @@ AssemblyLoadContext.Default.Resolving += static (context, name) =>
 
 if (args.Length == 0 || args.Contains("--help") || args.Contains("-h"))
 {
-    Console.WriteLine("Usage: VersioningRunner [--assemblies <path>] [--output <file>] [--test-all] [--subject-assembly-list <file>] [--configuration <name>] [--version-conditional <file>]");
+    Console.WriteLine("Usage: VersioningRunner [--assemblies <path>] [--datasets <path>] [--output <file>] [--test-all] [--subject-assembly-list <file>] [--configuration <name>] [--version-conditional <file>]");
     Console.WriteLine();
     Console.WriteLine("Options:");
     Console.WriteLine("  --assemblies <path>          BHoM assemblies folder (default: C:\\ProgramData\\BHoM\\Assemblies)");
+    Console.WriteLine("  --datasets <path>            Versioning dataset root, holding one directory per version.");
+    Console.WriteLine("                               Every Objects.json under it is read for the `_asm` field, which");
+    Console.WriteLine("                               gives an object record its declaring assembly. Omit the flag to");
+    Console.WriteLine("                               attribute object records by namespace prefix, as before.");
     Console.WriteLine("  --output <file>              Write JSON results to this file");
     Console.WriteLine("  --test-all                   Test all historical dataset versions (default: previous version only)");
     Console.WriteLine("  --configuration <name>       Build configuration this run compiled, recorded per finding.");
@@ -47,6 +51,13 @@ if (args.Length == 0 || args.Contains("--help") || args.Contains("-h"))
 }
 
 string assemblies = GetArg(args, "--assemblies") ?? @"C:\ProgramData\BHoM\Assemblies";
+
+// No default, unlike --assemblies. A default would make the runner fail hard wherever that
+// tree is absent, and versioning-full-history.yml drives this exe without the dataset guard
+// ci-versioning runs first. Absent means "nobody supplied a dataset", which is the
+// pre-existing behaviour, and the run says so on stdout rather than degrading quietly.
+string? datasets = GetArg(args, "--datasets");
+
 string? output = GetArg(args, "--output");
 bool testAll = args.Contains("--test-all");
 string? subject = GetArg(args, "--subject-assembly-list");
@@ -70,7 +81,7 @@ if (vcFile is not null && File.Exists(vcFile))
         .ToArray();
 }
 
-return RunCommand.Execute(assemblies, output, testAll, subject, configuration, versionConditional);
+return RunCommand.Execute(assemblies, output, testAll, subject, configuration, versionConditional, datasets);
 
 static string? GetArg(string[] args, string flag)
 {
