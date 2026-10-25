@@ -2,6 +2,12 @@
 # omitted (private repos do not enforce OSS copyright); all other jobs mirror
 # the BHoM variant. Copy to .github/workflows/ci-beta.yml in each BHE beta
 # repo. Runs on pull_request, non-blocking until a ruleset requires its checks.
+#
+# Some of these jobs may also be supplied to a repository by an organisation-level
+# required workflow. Where that happens the same job runs from two places until the
+# repository-local copy is reduced, so the two definitions must stay identical: a
+# difference between them surfaces as two check runs of the same name disagreeing,
+# which is unreadable on a pull request.
 # Workflow name CI keeps check contexts bare: required contexts are the job names.
 
 name: CI
@@ -64,6 +70,11 @@ jobs:
           # substring-based, not dataset-aware: '*' crosses '/' without :(glob), so
           # the substring can come from a filename, a data directory, or a project
           # directory named *_Datasets.
+          #
+          # No .ci/Datasets exclusion. Unit-test fixtures are in scope and the runner
+          # reports their Confidence findings as warnings, so they are visible without
+          # gating. Excluding them instead would also hide a fixture the engine cannot
+          # read, which is the case that most needs to be seen.
           patterns: ':(icase)*datasets*.json :(exclude,icase)*Versioning_Test/Datasets/*'
           app_id: ${{ secrets.BHOM_APP_ID }}
           private_key: ${{ secrets.BHOM_APP_PRIVATE_KEY }}
