@@ -38,6 +38,7 @@ class DatasetComplianceRunner
         var mergedResult   = new TestResult() { Status = TestStatus.Pass, Information = new List<ITestInformation>() };
         var allAnnotations = new List<Annotation>();
         var accounting     = new FileAccounting(files.Count);
+        var demotedTotal   = 0;
 
         foreach (var file in files)
         {
@@ -73,6 +74,18 @@ class DatasetComplianceRunner
                     accounting.CountNoResult();
                     Console.WriteLine($"  [SKIP] No result returned for: {file}");
                     continue;
+                }
+
+                // The Confidence rule errors on a dataset that leaves the field Undefined, which
+                // is right for a dataset the repository ships and wrong for a fixture driving
+                // its own tests. Demoted here rather than in the engine, and before the merge
+                // rather than at the annotation, because Modify.Merge combines only the two
+                // top-level statuses and the exit code reads the merged one.
+                if (FileFilter.IsUnitTestFixture(file))
+                {
+                    resultForThisFile = DatasetSeverity.DemoteToWarning(
+                        resultForThisFile, DatasetSeverity.ConfidenceRule, out int demotedHere);
+                    demotedTotal += demotedHere;
                 }
 
                 if (verbose) Console.WriteLine($"  Result Status: {resultForThisFile.Status}");
@@ -119,6 +132,16 @@ class DatasetComplianceRunner
                 Console.Error.WriteLine($"  [FAIL] {file}: {ex.GetType().Name}: {ex.Message}");
                 Console.Error.WriteLine(ex.ToString());
             }
+        }
+
+        // Guarded on the format for the same reason OutputEmitter guards the coverage line:
+        // json and sarif put a payload on stdout and nothing may precede it.
+        if (demotedTotal > 0 && (outputFormat == "console" || outputFormat == "github"))
+        {
+            string notice = DatasetSeverity.DemotionNotice(demotedTotal);
+            Console.WriteLine(outputFormat == "github"
+                ? $"::notice title=Dataset confidence::{notice}"
+                : $"NOTICE: {notice}");
         }
 
         const string checkType = "dataset";

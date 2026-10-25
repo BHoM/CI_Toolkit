@@ -32,6 +32,11 @@
       Unit/OutputEmitterTests.cs    OutputEmitter.Write takes a BH.oM.Test.TestStatus.
       Unit/AnnotationConvertTests.cs  Constructs BH.oM.Test.CodeCompliance.Error and
                                       exercises the ITestInformation conversion path.
+      Unit/DatasetSeverityTests.cs  DatasetSeverity rewrites a BH.oM.Test.Results.TestResult
+                                    and reads BH.oM.Test.CodeCompliance.Error, so neither it
+                                    nor its tests can be linked into the hermetic project.
+                                    Its path predicate is BHoM-free and does live there, in
+                                    FileFilter, which is the reason the two are split apart.
       Integration/*                 Invoke the built runner executables against real engines.
 
     Note the boundary is NOT unit-versus-integration: three of the six original unit test

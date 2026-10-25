@@ -109,4 +109,49 @@ public class FileFilterTests
         public bool IsVersioningUpgradeMap(string file)
             => FileFilter.IsVersioningUpgradeMap(file);
     }
+
+    [TestFixture]
+    public class IsUnitTestFixtureTests
+    {
+        // The shape that exists in practice.
+        [TestCase(".ci/Datasets/Compute/Split.json",         ExpectedResult = true)]
+        [TestCase(".ci/Datasets/foo.json",                   ExpectedResult = true)]
+        [TestCase(@".ci\Datasets\foo.json",                  ExpectedResult = true)]  // backslash separators
+        [TestCase(".CI/Datasets/foo.json",                   ExpectedResult = true)]  // segment case-insensitive
+        [TestCase(".Ci/DataSets/foo.json",                   ExpectedResult = true)]
+
+        // Not root-anchored. A nested .ci directory is still a .ci directory, and the answer
+        // must not change because a caller passed an absolute path.
+        [TestCase("SomeProject/.ci/Datasets/foo.json",       ExpectedResult = true)]
+        [TestCase("a/b/c/.ci/Datasets/deep/nested/x.json",   ExpectedResult = true)]
+        [TestCase("C:/work/repo/.ci/Datasets/foo.json",      ExpectedResult = true)]
+
+        // Any .ci descendant, not only .ci/Datasets. The repository convention puts test
+        // projects under .ci/unit-tests/, and a fixture dropped beside one is test data by the
+        // same argument. The narrower pair test left exactly this gap.
+        [TestCase(".ci/unit-tests/Datasets/foo.json",                      ExpectedResult = true)]
+        [TestCase(".ci/unit-tests/Foo_Tests/FooTests/Datasets/x.json",     ExpectedResult = true)]
+        [TestCase(".ci/DatasetsOld/foo.json",                              ExpectedResult = true)]
+        [TestCase(".ci/foo.json",                                          ExpectedResult = true)]
+        [TestCase("Datasets/.ci/foo.json",                                 ExpectedResult = true)]
+
+        // A production dataset, which is the case the whole split exists to keep blocking.
+        [TestCase("Datasets/Structure/EPD.json",             ExpectedResult = false)]
+        [TestCase("DataSets/Structure/DesignData/x.json",    ExpectedResult = false)]
+        [TestCase("Revit_Engine/Datasets/UK/Regional.json",  ExpectedResult = false)]
+
+        // The anchoring, which is the reason this is not a substring test. Each of these
+        // contains ".ci" in the path and must not match, because no whole segment is ".ci".
+        [TestCase("My.ci/Datasets/foo.json",                 ExpectedResult = false)]
+        [TestCase("x.ci/Datasets/foo.json",                  ExpectedResult = false)]
+        [TestCase(".cix/Datasets/foo.json",                  ExpectedResult = false)]
+        [TestCase("ci/Datasets/foo.json",                    ExpectedResult = false)]  // no leading dot
+
+        // Only the directory portion is read, so a file named .ci does not take itself out.
+        [TestCase("a/b/.ci",                                 ExpectedResult = false)]
+        [TestCase("Datasets.json",                           ExpectedResult = false)]
+        [TestCase("foo.json",                                ExpectedResult = false)]  // no directory at all
+        public bool IsUnitTestFixture(string file)
+            => FileFilter.IsUnitTestFixture(file);
+    }
 }
