@@ -246,4 +246,271 @@ public class DatasetComplianceRunnerE2ETests
             try { Directory.Delete(dir, recursive: true); } catch { /* temp dir, best effort */ }
         }
     }
+
+    // ── Confidence severity by dataset kind ──────────────────────────────────
+
+    /// <summary>
+    /// Writes one dataset under <paramref name="relativeDirectory"/> and returns it with the
+    /// root to clean up. The content is the same every time, so the only variable across these
+    /// tests is where the file sits.
+    /// </summary>
+    private static (string File, string Root) WriteDataset(string relativeDirectory, string name, string json)
+    {
+        string root = Path.Combine(Path.GetTempPath(), "bhom-ci-" + Guid.NewGuid().ToString("N"));
+        string directory = Path.Combine(root, relativeDirectory.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(directory);
+
+        string file = Path.Combine(directory, name);
+        File.WriteAllText(file, json);
+        return (file, root);
+    }
+
+    /// <summary>A dataset that deserialises and leaves Confidence unset, which is the rule under test.</summary>
+    private const string ConfidenceUnsetDataset =
+        "{ \"_t\" : \"BH.oM.Data.Library.Dataset\", \"Name\" : \"Probe\", "
+      + "\"SourceInformation\" : { \"_t\" : \"BH.oM.Data.Library.Source\", "
+      + "\"Title\" : \"Probe title\", \"Author\" : \"Probe author\", \"Confidence\" : \"Undefined\" }, "
+      + "\"Data\" : [] }";
+
+    [Test]
+    [Category("RequiresBHoM")]
+    [Description("The same dataset blocks under Datasets/ and only warns under .ci/Datasets/. One behaviour, both halves.")]
+    [TestCase("Datasets",     1, "failure", TestName = "ConfidenceUnset_InAProductionDataset_FailsTheRun")]
+    [TestCase(".ci/Datasets", 0, "warning", TestName = "ConfidenceUnset_InAUnitTestFixture_OnlyWarns")]
+    public void ConfidenceSeverity_DependsOnWhereTheDatasetSits(
+        string directory, int expectedExitCode, string expectedLevel)
+    {
+        var (file, root) = WriteDataset(directory, "Conf.json", ConfidenceUnsetDataset);
+        try
+        {
+            var (exitCode, stdout) = RunnerFixture.Run("DatasetComplianceRunner", "--output", "json", file);
+            var payload = JsonDocument.Parse(stdout).RootElement;
+
+            var confidence = payload.GetProperty("annotations").EnumerateArray()
+                .Single(a => a.GetProperty("ruleName").GetString() == "Dataset confidence error");
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(exitCode, Is.EqualTo(expectedExitCode));
+                Assert.That(confidence.GetProperty("level").GetString(), Is.EqualTo(expectedLevel));
+                Assert.That(payload.GetProperty("coverage").GetProperty("examined").GetInt32(), Is.EqualTo(1),
+                    "the demotion must not change what is selected or examined");
+            });
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); } catch { /* temp dir, best effort */ }
+        }
+    }
+
+    [Test]
+    [Category("RequiresBHoM")]
+    [Description("A fixture that does not deserialise still fails. Only the Confidence rule is demoted, and only its severity.")]
+    public void AFixtureThatDoesNotDeserialise_StillFailsTheRun()
+    {
+        var (file, root) = WriteDataset(".ci/Datasets", "Bad.json", "not a dataset");
+        try
+        {
+            var (exitCode, stdout) = RunnerFixture.Run("DatasetComplianceRunner", "--output", "json", file);
+            var payload = JsonDocument.Parse(stdout).RootElement;
+
+            var deserialisation = payload.GetProperty("annotations").EnumerateArray()
+                .Single(a => a.GetProperty("ruleName").GetString() == "Dataset deserialisation error");
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(exitCode, Is.EqualTo(1));
+                Assert.That(payload.GetProperty("status").GetString(), Is.EqualTo("Error"));
+                Assert.That(deserialisation.GetProperty("level").GetString(), Is.EqualTo("failure"));
+            });
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); } catch { /* temp dir, best effort */ }
+        }
+    }
+
+    [Test]
+    [Category("RequiresBHoM")]
+    [Description("A fixture's missing title is still a warning. The other source rules are untouched by the split.")]
+    public void AFixturesOtherSourceWarnings_AreUnchanged()
+    {
+        const string noTitle =
+            "{ \"_t\" : \"BH.oM.Data.Library.Dataset\", \"Name\" : \"Probe\", "
+          + "\"SourceInformation\" : { \"_t\" : \"BH.oM.Data.Library.Source\", "
+          + "\"Author\" : \"a\", \"Confidence\" : \"High\" }, \"Data\" : [] }";
+
+        var (file, root) = WriteDataset(".ci/Datasets", "NoTitle.json", noTitle);
+        try
+        {
+            var (exitCode, stdout) = RunnerFixture.Run("DatasetComplianceRunner", "--output", "json", file);
+            var payload = JsonDocument.Parse(stdout).RootElement;
+
+            var title = payload.GetProperty("annotations").EnumerateArray()
+                .Single(a => a.GetProperty("ruleName").GetString() == "Dataset source title error");
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(exitCode, Is.EqualTo(0));
+                Assert.That(title.GetProperty("level").GetString(), Is.EqualTo("warning"));
+            });
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); } catch { /* temp dir, best effort */ }
+        }
+    }
+
+    [Test]
+    [Category("RequiresBHoM")]
+    [Description("A demoted finding and a real one in the same run: the run is red and the demotion did not swallow either.")]
+    public void ADemotedFixtureAlongsideAFailingOne_StillFailsTheRun()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "bhom-ci-" + Guid.NewGuid().ToString("N"));
+        string fixtures = Path.Combine(root, ".ci", "Datasets");
+        Directory.CreateDirectory(fixtures);
+
+        string demoted = Path.Combine(fixtures, "Conf.json");
+        File.WriteAllText(demoted, ConfidenceUnsetDataset);
+        string broken = Path.Combine(fixtures, "Bad.json");
+        File.WriteAllText(broken, "not a dataset");
+
+        try
+        {
+            var (exitCode, stdout) = RunnerFixture.Run("DatasetComplianceRunner", "--output", "json", demoted, broken);
+            var payload = JsonDocument.Parse(stdout).RootElement;
+
+            var levels = payload.GetProperty("annotations").EnumerateArray()
+                .Where(a => a.GetProperty("ruleName").GetString()!.Length > 0)
+                .ToDictionary(a => a.GetProperty("ruleName").GetString()!,
+                              a => a.GetProperty("level").GetString());
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(exitCode, Is.EqualTo(1));
+                Assert.That(levels["Dataset confidence error"], Is.EqualTo("warning"));
+                Assert.That(levels["Dataset deserialisation error"], Is.EqualTo("failure"));
+            });
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); } catch { /* temp dir, best effort */ }
+        }
+    }
+
+    [Test]
+    [Category("RequiresBHoM")]
+    [Description("A green that demoted something says so, rather than looking like a run that found nothing.")]
+    public void ADemotedRun_ReportsWhatItDowngraded()
+    {
+        var (file, root) = WriteDataset(".ci/Datasets", "Conf.json", ConfidenceUnsetDataset);
+        try
+        {
+            var (exitCode, stdout) = RunnerFixture.Run("DatasetComplianceRunner", "--output", "github", file);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(exitCode, Is.EqualTo(0));
+                Assert.That(stdout, Does.Contain("::notice title=Dataset confidence::1 Confidence finding"));
+                Assert.That(stdout, Does.Contain("The field is still expected on those datasets."));
+                Assert.That(stdout, Does.Not.Contain("under .ci/Datasets"),
+                    "the notice must describe the scope the predicate applies, which is any .ci descendant");
+            });
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); } catch { /* temp dir, best effort */ }
+        }
+    }
+
+    [Test]
+    [Category("RequiresBHoM")]
+    [Description("json and sarif carry a payload on stdout, so the demotion notice must not precede it.")]
+    [TestCase("json")]
+    [TestCase("sarif")]
+    public void TheDemotionNotice_DoesNotContaminateAMachineReadablePayload(string format)
+    {
+        var (file, root) = WriteDataset(".ci/Datasets", "Conf.json", ConfidenceUnsetDataset);
+        try
+        {
+            var (_, stdout) = RunnerFixture.Run("DatasetComplianceRunner", "--output", format, file);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(stdout, Does.Not.Contain("Confidence finding(s) in unit-test fixtures"));
+                Assert.That(() => JsonDocument.Parse(stdout), Throws.Nothing,
+                    "stdout must be the payload and nothing else, which is the property at risk here");
+            });
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); } catch { /* temp dir, best effort */ }
+        }
+    }
+
+    [Test]
+    [Category("RequiresBHoM")]
+    [Description("SARIF carries the demoted finding at warning too. The level is mapped in a second place.")]
+    public void ADemotedFinding_IsAWarningInSarifAsWell()
+    {
+        var (file, root) = WriteDataset(".ci/Datasets", "Conf.json", ConfidenceUnsetDataset);
+        try
+        {
+            var (exitCode, stdout) = RunnerFixture.Run("DatasetComplianceRunner", "--output", "sarif", file);
+            var results = JsonDocument.Parse(stdout).RootElement
+                .GetProperty("runs")[0].GetProperty("results");
+
+            var confidence = results.EnumerateArray()
+                .Single(r => r.GetProperty("ruleId").GetString()!.Contains("Dataset confidence error"));
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(exitCode, Is.EqualTo(0));
+                Assert.That(confidence.GetProperty("level").GetString(), Is.EqualTo("warning"),
+                    "SarifBuilder maps the level separately from the GitHub emitter, so it needs its own assertion");
+            });
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); } catch { /* temp dir, best effort */ }
+        }
+    }
+
+    /// <summary>
+    /// Pins the rule name the demotion keys on against the engine that actually produces it.
+    ///
+    /// DatasetSeverity matches a string owned by Test_Toolkit. If that name is reworded upstream
+    /// the demotion silently stops matching, every fixture goes back to blocking, and nothing
+    /// points at the cause. This fails the build here instead. It deliberately uses the literal
+    /// rather than the constant on one side, so a change to the constant cannot make it pass.
+    /// </summary>
+    [Test]
+    [Category("RequiresBHoM")]
+    [Description("The engine still calls the Confidence finding what DatasetSeverity expects.")]
+    public void TheEngineStillNamesTheConfidenceRuleWhatTheDemotionExpects()
+    {
+        var (file, root) = WriteDataset("Datasets", "Conf.json", ConfidenceUnsetDataset);
+        try
+        {
+            var (_, stdout) = RunnerFixture.Run("DatasetComplianceRunner", "--output", "json", file);
+            var payload = JsonDocument.Parse(stdout).RootElement;
+
+            var ruleNames = payload.GetProperty("annotations").EnumerateArray()
+                .Select(a => a.GetProperty("ruleName").GetString())
+                .ToList();
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(ruleNames, Does.Contain("Dataset confidence error"),
+                    "the engine's name for this finding has changed; DatasetSeverity.ConfidenceRule no longer matches it");
+                Assert.That(DatasetSeverity.ConfidenceRule, Is.EqualTo("Dataset confidence error"),
+                    "the constant has been edited away from the name the engine emits");
+            });
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); } catch { /* temp dir, best effort */ }
+        }
+    }
+
 }

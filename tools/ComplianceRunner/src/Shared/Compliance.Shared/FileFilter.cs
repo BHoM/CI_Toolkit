@@ -90,6 +90,47 @@ public static class FileFilter
     }
 
     /// <summary>
+    /// True when a file sits anywhere under a ".ci" directory, case-insensitive, which is where
+    /// a repository keeps the inputs to its own tests rather than anything it ships.
+    /// </summary>
+    /// <remarks>
+    /// Separates a dataset a repository ships from one that exists only to drive its own tests.
+    /// The engine has no concept of that difference and should not: it is a convention about
+    /// where CI puts things, so it is decided here rather than in the compliance rule.
+    ///
+    /// Anchored on a whole segment, not on a substring. A substring test matches a directory
+    /// named My.ci or .cix, which is the same fault <c>IsUnderDatasetsDirectory</c> above was
+    /// changed to avoid.
+    ///
+    /// Not root-anchored, so a nested SomeProject/.ci counts. That directory is a .ci directory
+    /// wherever it sits, and the answer must not change because a caller passed an absolute path
+    /// rather than a repository-relative one.
+    ///
+    /// Any .ci descendant rather than .ci/Datasets specifically, which is the broader of the two
+    /// readings and matches what IsRelevantFile already does for the project check. The narrower
+    /// one left a gap: the repository convention puts test projects under .ci/unit-tests/, and a
+    /// fixture under one of those would have been examined and not demoted. Both spellings give
+    /// the same answer on the fleet as it stands, so this closes a class rather than changing an
+    /// outcome.
+    /// </remarks>
+    public static bool IsUnitTestFixture(string file)
+    {
+        var normalized = file.Replace("\\", "/");
+
+        int lastSlash = normalized.LastIndexOf('/');
+        if (lastSlash < 0)
+            return false;
+
+        foreach (var segment in normalized.Substring(0, lastSlash).Split('/'))
+        {
+            if (segment.Equals(".ci", StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// True for a versioning upgrade map, named Versioning_&lt;digits&gt;.json.
     /// </summary>
     /// <remarks>
