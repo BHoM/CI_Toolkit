@@ -8,7 +8,10 @@
 # Extending orgs: override test_toolkit_repo via with: to point at a fork.
 # Dep forks must carry the relevant changes on the PR's base branch,
 # not the fork's default branch, since resolve-dependencies clones from the base.
-# Workflow name CI keeps check contexts bare: required contexts are the job names.
+# Check contexts are the job names and do not depend on this workflow's name.
+# Keep the name distinct from the required workflow's: the concurrency group is
+# built from the name and is scoped to the repository, so two workflows sharing
+# a name would let their runs cancel each other.
 
 name: CI
 

@@ -8,7 +8,10 @@
 # repository-local copy is reduced, so the two definitions must stay identical: a
 # difference between them surfaces as two check runs of the same name disagreeing,
 # which is unreadable on a pull request.
-# Workflow name CI keeps check contexts bare: required contexts are the job names.
+# Check contexts are the job names and do not depend on this workflow's name.
+# Keep the name distinct from the required workflow's: the concurrency group is
+# built from the name and is scoped to the repository, so two workflows sharing
+# a name would let their runs cancel each other.
 
 name: CI
 

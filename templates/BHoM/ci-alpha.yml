@@ -2,7 +2,10 @@
 # copyright-compliance (BHoM enforces OSS copyright; the BHE variant omits it).
 # Copy to .github/workflows/ci-alpha.yml in each BHoM alpha repo.
 # Runs on pull_request, non-blocking until a ruleset requires its checks.
-# Workflow name CI keeps check contexts bare: required contexts are the job names.
+# Check contexts are the job names and do not depend on this workflow's name.
+# Keep the name distinct from the required workflow's: the concurrency group is
+# built from the name and is scoped to the repository, so two workflows sharing
+# a name would let their runs cancel each other.
 
 name: CI
 

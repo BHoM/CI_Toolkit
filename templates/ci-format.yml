@@ -4,7 +4,10 @@
 #
 # Rulesets ignore event filters on required workflows, so this file has
 # no paths filter. The composite self-skips when no relevant files have changed.
-# Workflow name CI keeps check contexts bare: required contexts are the job names.
+# Check contexts are the job names and do not depend on this workflow's name.
+# Keep the name distinct from the required workflow's: the concurrency group is
+# built from the name and is scoped to the repository, so two workflows sharing
+# a name would let their runs cancel each other.
 
 name: CI
 
