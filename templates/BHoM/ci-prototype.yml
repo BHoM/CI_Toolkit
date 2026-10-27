@@ -2,7 +2,10 @@
 # copyright-compliance (BHoM enforces OSS copyright; the BHE variant omits it).
 # Copy to .github/workflows/ci-prototype.yml in each BHoM prototype repo.
 # Runs on pull_request, non-blocking until a ruleset requires its checks.
-# Workflow name CI keeps check contexts bare: required contexts are the job names.
+# Check contexts are the job names and do not depend on this workflow's name.
+# Keep the name distinct from the required workflow's: the concurrency group is
+# built from the name and is scoped to the repository, so two workflows sharing
+# a name would let their runs cancel each other.
 
 name: CI
 
@@ -12,7 +15,11 @@ on:
       - develop
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  # The literal prefix is the separation. A concurrency group is scoped to the
+  # repository, not to one workflow, so without it this group would collide with
+  # any other workflow that happened to share this one's name. The tier is in the
+  # prefix so two tier files in one repository cannot collide either.
+  group: local-ci-prototype-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:

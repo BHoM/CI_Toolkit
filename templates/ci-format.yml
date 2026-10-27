@@ -4,7 +4,10 @@
 #
 # Rulesets ignore event filters on required workflows, so this file has
 # no paths filter. The composite self-skips when no relevant files have changed.
-# Workflow name CI keeps check contexts bare: required contexts are the job names.
+# Check contexts are the job names and do not depend on this workflow's name.
+# Keep the name distinct from the required workflow's: the concurrency group is
+# built from the name and is scoped to the repository, so two workflows sharing
+# a name would let their runs cancel each other.
 
 name: CI
 
@@ -12,7 +15,11 @@ on:
   pull_request:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  # The literal prefix is the separation. A concurrency group is scoped to the
+  # repository, not to one workflow, so without it this group would collide with
+  # any other workflow that happened to share this one's name. This file is a
+  # required-workflow source, so its prefix matches the other required workflows'.
+  group: required-ci-format-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
