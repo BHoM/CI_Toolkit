@@ -16,7 +16,11 @@ on:
       - develop
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  # The literal prefix is the separation. A concurrency group is scoped to the
+  # repository, not to one workflow, so without it this group would collide with
+  # any other workflow that happened to share this one's name. The tier is in the
+  # prefix so two tier files in one repository cannot collide either.
+  group: local-ci-prototype-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
