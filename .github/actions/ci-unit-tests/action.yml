@@ -223,6 +223,8 @@ runs:
         $noOutput      = @()   # ran, produced no .trx: runner load failure
         $testFailed    = @()   # at least one test failed
         $allExcluded   = @()   # has tests, every one carries the category
+        $noneExecuted  = @()   # tests survived the filter, none of them ran
+        $partialNotRun = @()   # some ran, some did not
         $rows          = @()
         $ranTotal      = 0
 
@@ -237,7 +239,7 @@ runs:
           Write-Host "::endgroup::"
           if ($buildExit -ne 0) {
             $buildFailed += $name
-            $rows += [pscustomobject]@{ Project = $name; Discovered = '-'; Ran = '-'; Excluded = '-'; Failed = '-'; Result = 'build failed' }
+            $rows += [pscustomobject]@{ Project = $name; Discovered = '-'; Ran = '-'; Excluded = '-'; NotRun = '-'; Failed = '-'; Result = 'build failed' }
             continue
           }
 
@@ -280,13 +282,13 @@ runs:
 
           if (-not $listRead) {
             $undetermined += $name
-            $rows += [pscustomobject]@{ Project = $name; Discovered = '?'; Ran = '-'; Excluded = '-'; Failed = '-'; Result = 'count unreadable' }
+            $rows += [pscustomobject]@{ Project = $name; Discovered = '?'; Ran = '-'; Excluded = '-'; NotRun = '-'; Failed = '-'; Result = 'count unreadable' }
             continue
           }
 
           if ($discovered -eq 0) {
             $noTests += $name
-            $rows += [pscustomobject]@{ Project = $name; Discovered = 0; Ran = 0; Excluded = 0; Failed = 0; Result = 'no tests' }
+            $rows += [pscustomobject]@{ Project = $name; Discovered = 0; Ran = 0; Excluded = 0; NotRun = 0; Failed = 0; Result = 'no tests' }
             continue
           }
 
@@ -300,7 +302,7 @@ runs:
           $trx = Join-Path "TestResults" "$name.trx"
           if (-not (Test-Path $trx)) {
             $noOutput += $name
-            $rows += [pscustomobject]@{ Project = $name; Discovered = $discovered; Ran = '-'; Excluded = '-'; Failed = '-'; Result = 'no test output' }
+            $rows += [pscustomobject]@{ Project = $name; Discovered = $discovered; Ran = '-'; Excluded = '-'; NotRun = '-'; Failed = '-'; Result = 'no test output' }
             continue
           }
 
@@ -310,22 +312,42 @@ runs:
           $executed = [int]$counters.executed
           $failedN  = [int]$counters.failed
           $excluded = $discovered - $total
+          # Tests the filter admitted and the run did not execute: inconclusive,
+          # ignored, or anything else the adapter declines to run. The `executed`
+          # counter is the signal; the dedicated `inconclusive` and `notExecuted`
+          # counters stay at 0 for NUnit, so the outcomes cannot be told apart
+          # from the summary and do not need to be.
+          $notRun      = $total - $executed
+          $notRunNames = @($trxXml.TestRun.Results.UnitTestResult |
+            Where-Object { $_.outcome -ne 'Passed' -and $_.outcome -ne 'Failed' } |
+            ForEach-Object { $_.testName })
           $ranTotal += $executed
 
           if ($exit -ne 0 -or $failedN -gt 0) {
             $testFailed += $name
             $result = 'failed'
           } elseif ($total -eq 0) {
+            # Every test carried the category. Nothing ran, and that is the
+            # intended outcome rather than a defect.
             $allExcluded += $name
             $result = 'all excluded'
+          } elseif ($executed -eq 0) {
+            # Tests survived the filter and still none ran. A check that passes
+            # here reports green on a project that examined nothing.
+            $noneExecuted += [pscustomobject]@{ Name = $name; Discovered = $discovered; NotRun = $notRun }
+            $result = 'none executed'
           } else {
-            $result = 'passed'
+            $result = if ($notRun -gt 0) { 'passed, some not run' } else { 'passed' }
           }
 
-          $rows += [pscustomobject]@{ Project = $name; Discovered = $discovered; Ran = $executed; Excluded = $excluded; Failed = $failedN; Result = $result }
+          $rows += [pscustomobject]@{ Project = $name; Discovered = $discovered; Ran = $executed; Excluded = $excluded; NotRun = $notRun; Failed = $failedN; Result = $result }
 
           if ($excluded -gt 0) {
             Write-Host "::notice title=UnitTests::${name}: skipped: $excluded tests require external software"
+          }
+          if ($executed -gt 0 -and $notRun -gt 0) {
+            $partialNotRun += [pscustomobject]@{ Name = $name; NotRun = $notRun; Total = $total; Names = $notRunNames }
+            Write-Host "::warning title=UnitTests::${name}: $notRun of $total tests did not run: $($notRunNames -join ', ')"
           }
         }
 
@@ -336,17 +358,32 @@ runs:
         ""                                                                        | Add-Content -Path $env:GITHUB_STEP_SUMMARY
         "Filter: ``$filter``"                                                     | Add-Content -Path $env:GITHUB_STEP_SUMMARY
         ""                                                                        | Add-Content -Path $env:GITHUB_STEP_SUMMARY
-        "| Project | Discovered | Ran | Excluded | Failed | Result |"              | Add-Content -Path $env:GITHUB_STEP_SUMMARY
-        "|---|---:|---:|---:|---:|---|"                                           | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        "| Project | Discovered | Ran | Excluded | Not run | Failed | Result |"     | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        "|---|---:|---:|---:|---:|---:|---|"                                      | Add-Content -Path $env:GITHUB_STEP_SUMMARY
         foreach ($r in $rows) {
-          "| $($r.Project) | $($r.Discovered) | $($r.Ran) | $($r.Excluded) | $($r.Failed) | $($r.Result) |" |
+          "| $($r.Project) | $($r.Discovered) | $($r.Ran) | $($r.Excluded) | $($r.NotRun) | $($r.Failed) | $($r.Result) |" |
             Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        }
+
+        if ($partialNotRun) {
+          ""                                                                      | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+          "> **Not run.** These tests were admitted by the filter and the runner did not execute them, usually `Assert.Inconclusive` or `[Ignore]`. The check passed on the tests that did run." |
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY
+          ""                                                                      | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+          foreach ($p in $partialNotRun) {
+            foreach ($t in $p.Names) { "- ``$($p.Name)``: $t" | Add-Content -Path $env:GITHUB_STEP_SUMMARY }
+          }
         }
 
         foreach ($n in $allExcluded) {
           Write-Host "::notice title=UnitTests::${n}: every test carries [Category(`"$category`")], so none ran. This is a pass."
         }
-        if ($ranTotal -eq 0 -and -not $buildFailed -and -not $undetermined -and -not $noTests -and -not $noOutput) {
+
+        # Only claim category exclusion when category exclusion is what happened.
+        # The earlier form fired on `ranTotal -eq 0` alone and so asserted it
+        # about a repository whose tests were all inconclusive instead.
+        $ranProjects = @($rows | Where-Object { $_.Result -ne 'build failed' -and $_.Result -ne 'count unreadable' -and $_.Result -ne 'no test output' })
+        if ($ranTotal -eq 0 -and $ranProjects.Count -gt 0 -and $allExcluded.Count -eq $ranProjects.Count) {
           Write-Host "::warning title=UnitTests::No test ran in this repository: every discovered test carries [Category(`"$category`")]."
         }
 
@@ -360,9 +397,12 @@ runs:
           Write-Host "::error title=UnitTests::could not determine test count for $n . ``dotnet test --list-tests`` neither listed a test nor reported that none was available, so the project cannot be judged. This is a fault in the check or in the project's test host, not evidence about its tests."
         }
         if ($noTests)      { Write-Host "::error title=UnitTests::No test found in project(s): $($noTests -join ', ') . The project compiled but declares no test. Remove the project or add tests." }
+        foreach ($p in $noneExecuted) {
+          Write-Host "::error title=UnitTests::no tests executed in $($p.Name) ($($p.Discovered) discovered, $($p.NotRun) not run). The filter admitted these tests and none of them ran, so this project examined nothing. Tag them [Category(`"$category`")] if they need software a runner cannot have, otherwise fix what is stopping them."
+        }
         if ($noOutput)     { Write-Host "::error title=UnitTests::No test output from project(s): $($noOutput -join ', ') . The run produced no .trx, which indicates a runner load failure." }
         if ($testFailed)   { Write-Host "::error title=UnitTests::Test runs failed for project(s): $($testFailed -join ', ')" }
-        if ($buildFailed -or $undetermined -or $noTests -or $noOutput -or $testFailed) { exit 1 }
+        if ($buildFailed -or $undetermined -or $noTests -or $noneExecuted -or $noOutput -or $testFailed) { exit 1 }
 
     - name: Upload test results (TRX)
       if: always() && hashFiles('TestResults/**/*.trx') != ''
