@@ -27,14 +27,25 @@ inputs:
       Test_Toolkit repository (owner/repo). Override to point at a fork.
     required: false
     default: "BHoM/Test_Toolkit"
-  dotnet_version:
+  deps_dotnet_version:
     description: >
-      SDK pinned for both the dependency build and the caller's test build.
-      Written to a generated global.json at the workspace root, because
-      setup-dotnet installs a version but does not select it: without the
-      pin `dotnet test` takes the newest SDK on the runner image.
+      SDK for the dependency build, passed through to resolve-dependencies,
+      which pins it at its own clone root. Separate from the caller's test
+      SDK below: the dependency graph is built on 8.0 fleet-wide and moving
+      it is a change of its own.
     required: false
     default: '8.0'
+  test_dotnet_version:
+    description: >
+      SDK pinned for the caller's test build, written to a generated
+      global.json at the workspace root. setup-dotnet installs a version but
+      does not select it, so without the pin `dotnet test` takes the newest
+      SDK on the runner image and the check drifts with every image refresh.
+      An `X.Y` value is expanded to `X.Y.100` and pinned with
+      `rollForward: latestFeature`, which accepts any feature band and patch
+      of that minor and never crosses into another major.
+    required: false
+    default: '10.0'
   external_category:
     description: >
       NUnit category excluded from the run. Tests needing software a hosted
@@ -164,28 +175,32 @@ runs:
       with:
         mode:             caller
         additional_seeds: ${{ inputs.test_toolkit_repo }}
-        dotnet_version:   ${{ inputs.dotnet_version }}
+        dotnet_version:   ${{ inputs.deps_dotnet_version }}
         configuration:    Release
         token:            ${{ steps.dep-token.outputs.token }}
 
-    # resolve-dependencies pins the SDK at its own clone root (C:\bhom-deps),
-    # which governs the dependency build and nothing else. The caller's test
-    # build runs in the workspace, so it needs its own pin: setup-dotnet
-    # installs 8.0 but leaves the newest image SDK selected. Measured on
-    # windows-2025-vs2026: `dotnet --version` reported 10.0.402 with
-    # setup-dotnet asking for 8.0.
+    # resolve-dependencies pins the SDK at its own clone root, which governs
+    # the dependency build and nothing else. The caller's test build runs in
+    # the workspace, so it needs its own pin: setup-dotnet installs a version
+    # without selecting it, and the newest SDK on the image wins by default.
+    # A repository that ships its own global.json has already made this choice
+    # and is left alone.
     - name: Pin SDK for the caller workspace
       if: steps.test_check.outputs.found == 'true'
       shell: pwsh
       env:
-        DOTNET_VERSION: ${{ inputs.dotnet_version }}
+        TEST_DOTNET_VERSION: ${{ inputs.test_dotnet_version }}
       run: |
         if (Test-Path "global.json") {
           Write-Host "::notice title=UnitTests::Repository supplies its own global.json; leaving it in place."
+          Write-Host (Get-Content "global.json" -Raw)
         } else {
-          $sdkVersion = $env:DOTNET_VERSION
-          if ($sdkVersion -match '^\d+\.\d+$') { $sdkVersion = "$sdkVersion.0" }
-          [ordered]@{ sdk = [ordered]@{ version = $sdkVersion; rollForward = "latestMinor" } } `
+          # `latestFeature` accepts any feature band and patch of the requested
+          # minor and refuses to cross a major, so an image refresh that adds a
+          # new major does not silently change what built the tests.
+          $sdkVersion = $env:TEST_DOTNET_VERSION
+          if ($sdkVersion -match '^\d+\.\d+$') { $sdkVersion = "$sdkVersion.100" }
+          [ordered]@{ sdk = [ordered]@{ version = $sdkVersion; rollForward = "latestFeature" } } `
             | ConvertTo-Json | Set-Content "global.json" -Encoding utf8
         }
         Write-Host "::notice title=UnitTests::SDK in use: $(dotnet --version)"
@@ -225,6 +240,8 @@ runs:
         $allExcluded   = @()   # has tests, every one carries the category
         $noneExecuted  = @()   # tests survived the filter, none of them ran
         $partialNotRun = @()   # some ran, some did not
+        $badResults    = @()   # .trx present but carries no counters
+        $countMismatch = @()   # listing and run disagree on case expansion
         $rows          = @()
         $ranTotal      = 0
 
@@ -253,31 +270,51 @@ runs:
           Write-Host $listOut
           Write-Host "::endgroup::"
 
-          # Two readable outcomes, and everything else is unreadable rather
-          # than zero. Reading an unparseable listing as "no tests" would turn
-          # a tooling change into a fleet-wide red that looks like a repository
-          # defect, so it gets a message of its own.
+          # Three outcomes to separate, and the shape of the output is the only
+          # evidence available:
           #
-          # The marker alone is not enough. Measured on sandbox run 41441469327:
-          # when the test host fails to start, VSTest prints the marker, then an
-          # exception and its stack trace, and still exits 0. Every line of that
-          # trace is indented, so a naive count read six "tests" out of a project
-          # with two. Hence the exception check, and the stop at the first blank
-          # line that terminates a real listing.
-          $discovered = 0
-          $listRead   = $false
-          if ($listExit -eq 0 -and $listOut -notmatch 'Exception' -and $listOut -notmatch 'Please check the diagnostic logs') {
-            $lines  = $listOut -split "`r?`n"
-            $marker = [Array]::FindIndex([string[]]$lines, [Predicate[string]]{ param($l) $l -match 'The following Tests are available' })
-            if ($marker -ge 0 -and $marker -lt ($lines.Count - 1)) {
-              foreach ($l in $lines[($marker + 1)..($lines.Count - 1)]) {
-                if ($l -notmatch '^\s+\S') { break }
-                $discovered++
-              }
-              $listRead = $discovered -gt 0
-            } elseif ($listOut -match 'No test is available in') {
-              $listRead = $true
+          #   a real listing   marker, then one indented line per test
+          #   no test at all   marker, then an unindented "No test is available"
+          #   a broken host    marker, then an exception at column 0 and a trace
+          #
+          # The marker is printed in all three, so it cannot decide anything on
+          # its own. The listing is the contiguous indented block after it, and
+          # the diagnostics are judged only on the lines outside that block:
+          # a test display name may legitimately contain the word Exception
+          # (`LoadAssembliesShouldThrowException`, or a parameterised case
+          # rendered as `Throws(System.InvalidOperationException)`), so matching
+          # it anywhere in the output would read a healthy project as broken.
+          $lines  = $listOut -split "`r?`n"
+          $marker = [Array]::FindIndex([string[]]$lines, [Predicate[string]]{ param($l) $l -match 'The following Tests are available' })
+
+          $listing = @()
+          if ($marker -ge 0) {
+            for ($i = $marker + 1; $i -lt $lines.Count; $i++) {
+              if ($lines[$i] -notmatch '^\s+\S') { break }
+              $listing += $lines[$i]
             }
+          }
+          $blockEnd = $marker + $listing.Count
+          $outside  = @(for ($i = 0; $i -lt $lines.Count; $i++) {
+            if ($marker -lt 0 -or $i -le $marker -or $i -gt $blockEnd) { $lines[$i] }
+          })
+
+          # VSTest states a zero-test assembly explicitly, unindented.
+          $zeroStated = @($lines | Where-Object { $_ -match '^No test is available in ' }).Count -gt 0
+          # Test-host failures surface as a TestPlatformException, a stack frame
+          # (`   at Namespace.Type.Method(`) or the diagnostic-logs hint, all of
+          # them outside the listing block.
+          $brokenHost = @($outside | Where-Object {
+            $_ -match 'TestPlatformException' -or
+            $_ -match '^\s*at [\w.`+<>]+\.[\w`+<>]+\(' -or
+            $_ -match 'Please check the diagnostic logs'
+          }).Count -gt 0
+
+          $discovered = $listing.Count
+          $listRead   = $false
+          if ($listExit -eq 0 -and -not $brokenHost) {
+            if ($discovered -gt 0)                        { $listRead = $true }
+            elseif ($zeroStated)                          { $listRead = $true }
           }
 
           if (-not $listRead) {
@@ -306,12 +343,33 @@ runs:
             continue
           }
 
-          [xml]$trxXml = Get-Content $trx
-          $counters = $trxXml.TestRun.ResultSummary.Counters
+          $counters = $null
+          try {
+            [xml]$trxXml = Get-Content $trx
+            $counters = $trxXml.TestRun.ResultSummary.Counters
+          } catch {
+            Write-Host "::debug::TRX for $name did not parse: $($_.Exception.Message)"
+          }
+          # A results file that parses but carries no counters proves nothing.
+          # Reading its absent attributes as zero would make it indistinguishable
+          # from "every test carried the category", which is a pass.
+          if (-not $counters -or $null -eq $counters.total) {
+            $badResults += $name
+            $rows += [pscustomobject]@{ Project = $name; Discovered = $discovered; Ran = '-'; Excluded = '-'; NotRun = '-'; Failed = '-'; Result = 'results unreadable' }
+            continue
+          }
           $total    = [int]$counters.total
           $executed = [int]$counters.executed
           $failedN  = [int]$counters.failed
           $excluded = $discovered - $total
+
+          # A negative figure means the listing and the run disagree on how many
+          # cases a parameterised test expands to, so neither the excluded count
+          # nor anything derived from it can be trusted for this project.
+          if ($excluded -lt 0) {
+            Write-Host "::warning title=UnitTests::${name}: the run matched $total tests but only $discovered were listed. The excluded count is not meaningful here, which usually means parameterised cases expand differently in the listing and the run."
+            $countMismatch += $name
+          }
           # Tests the filter admitted and the run did not execute: inconclusive,
           # ignored, or anything else the adapter declines to run. The `executed`
           # counter is the signal; the dedicated `inconclusive` and `notExecuted`
@@ -347,7 +405,13 @@ runs:
           }
           if ($executed -gt 0 -and $notRun -gt 0) {
             $partialNotRun += [pscustomobject]@{ Name = $name; NotRun = $notRun; Total = $total; Names = $notRunNames }
-            Write-Host "::warning title=UnitTests::${name}: $notRun of $total tests did not run: $($notRunNames -join ', ')"
+            # GitHub truncates an annotation at roughly four thousand characters,
+            # and a parameterised fixture can produce hundreds of names. Cap the
+            # annotation and keep the full list in the job summary, which has no
+            # such limit.
+            $shown = @($notRunNames | Select-Object -First 20)
+            $tail  = if ($notRunNames.Count -gt $shown.Count) { " and $($notRunNames.Count - $shown.Count) more" } else { "" }
+            Write-Host "::warning title=UnitTests::${name}: $notRun of $total tests did not run: $($shown -join ', ')$tail"
           }
         }
 
@@ -382,7 +446,8 @@ runs:
         # Only claim category exclusion when category exclusion is what happened.
         # The earlier form fired on `ranTotal -eq 0` alone and so asserted it
         # about a repository whose tests were all inconclusive instead.
-        $ranProjects = @($rows | Where-Object { $_.Result -ne 'build failed' -and $_.Result -ne 'count unreadable' -and $_.Result -ne 'no test output' })
+        $notJudged   = @('build failed', 'count unreadable', 'no test output', 'results unreadable')
+        $ranProjects = @($rows | Where-Object { $notJudged -notcontains $_.Result })
         if ($ranTotal -eq 0 -and $ranProjects.Count -gt 0 -and $allExcluded.Count -eq $ranProjects.Count) {
           Write-Host "::warning title=UnitTests::No test ran in this repository: every discovered test carries [Category(`"$category`")]."
         }
@@ -401,8 +466,9 @@ runs:
           Write-Host "::error title=UnitTests::no tests executed in $($p.Name) ($($p.Discovered) discovered, $($p.NotRun) not run). The filter admitted these tests and none of them ran, so this project examined nothing. Tag them [Category(`"$category`")] if they need software a runner cannot have, otherwise fix what is stopping them."
         }
         if ($noOutput)     { Write-Host "::error title=UnitTests::No test output from project(s): $($noOutput -join ', ') . The run produced no .trx, which indicates a runner load failure." }
+        if ($badResults)   { Write-Host "::error title=UnitTests::Test results could not be read for project(s): $($badResults -join ', ') . The .trx exists but carries no ResultSummary/Counters, so the run cannot be judged." }
         if ($testFailed)   { Write-Host "::error title=UnitTests::Test runs failed for project(s): $($testFailed -join ', ')" }
-        if ($buildFailed -or $undetermined -or $noTests -or $noneExecuted -or $noOutput -or $testFailed) { exit 1 }
+        if ($buildFailed -or $undetermined -or $noTests -or $noneExecuted -or $noOutput -or $badResults -or $testFailed) { exit 1 }
 
     - name: Upload test results (TRX)
       if: always() && hashFiles('TestResults/**/*.trx') != ''
