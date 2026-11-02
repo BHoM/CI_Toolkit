@@ -206,6 +206,10 @@ runs:
         # major (currently .NET 8) for deterministic behaviour across image
         # refreshes; `LatestMajor` would track the newest installed runtime.
         DOTNET_ROLL_FORWARD: Major
+        # The test count is read out of `--list-tests` prose, and VSTest
+        # localises that prose to the machine's UI language. Pin it so the
+        # markers below are the strings the runner actually prints.
+        DOTNET_CLI_UI_LANGUAGE: en
         PROJECT_LIST: ${{ runner.temp }}/ci-unit-tests-projects.txt
         EXTERNAL_CATEGORY: ${{ inputs.external_category }}
       run: |
@@ -213,13 +217,14 @@ runs:
         $category = $env:EXTERNAL_CATEGORY
         $filter   = "TestCategory!=$category"
 
-        $buildFailed  = @()   # did not compile
-        $noTests      = @()   # compiled, contains no test at all
-        $noOutput     = @()   # ran, produced no .trx: runner load failure
-        $testFailed   = @()   # at least one test failed
-        $allExcluded  = @()   # has tests, every one carries the category
-        $rows         = @()
-        $ranTotal     = 0
+        $buildFailed   = @()   # did not compile
+        $undetermined  = @()   # `--list-tests` could not be read
+        $noTests       = @()   # compiled, contains no test at all
+        $noOutput      = @()   # ran, produced no .trx: runner load failure
+        $testFailed    = @()   # at least one test failed
+        $allExcluded   = @()   # has tests, every one carries the category
+        $rows          = @()
+        $ranTotal      = 0
 
         foreach ($proj in $projects) {
           $name = [IO.Path]::GetFileNameWithoutExtension($proj)
@@ -242,14 +247,31 @@ runs:
           # extra invocation against an already-built project.
           Write-Host "::group::dotnet test $name --list-tests"
           $listOut = (dotnet test $proj -c Test --no-build --list-tests 2>&1 | Out-String)
+          $listExit = $LASTEXITCODE
           Write-Host $listOut
           Write-Host "::endgroup::"
 
+          # Two readable outcomes, and everything else is unreadable rather
+          # than zero. Reading an unparseable listing as "no tests" would turn
+          # a tooling change into a fleet-wide red that looks like a repository
+          # defect, so it gets a message of its own.
           $discovered = 0
-          $lines  = $listOut -split "`r?`n"
-          $marker = [Array]::FindIndex([string[]]$lines, [Predicate[string]]{ param($l) $l -match 'The following Tests are available' })
-          if ($marker -ge 0 -and $marker -lt ($lines.Count - 1)) {
-            $discovered = @($lines[($marker + 1)..($lines.Count - 1)] | Where-Object { $_ -match '^\s+\S' }).Count
+          $listRead   = $false
+          if ($listExit -eq 0) {
+            $lines  = $listOut -split "`r?`n"
+            $marker = [Array]::FindIndex([string[]]$lines, [Predicate[string]]{ param($l) $l -match 'The following Tests are available' })
+            if ($marker -ge 0 -and $marker -lt ($lines.Count - 1)) {
+              $discovered = @($lines[($marker + 1)..($lines.Count - 1)] | Where-Object { $_ -match '^\s+\S' }).Count
+              $listRead   = $discovered -gt 0
+            } elseif ($listOut -match 'No test is available in') {
+              $listRead = $true
+            }
+          }
+
+          if (-not $listRead) {
+            $undetermined += $name
+            $rows += [pscustomobject]@{ Project = $name; Discovered = '?'; Ran = '-'; Excluded = '-'; Failed = '-'; Result = 'count unreadable' }
+            continue
           }
 
           if ($discovered -eq 0) {
@@ -314,7 +336,7 @@ runs:
         foreach ($n in $allExcluded) {
           Write-Host "::notice title=UnitTests::${n}: every test carries [Category(`"$category`")], so none ran. This is a pass."
         }
-        if ($ranTotal -eq 0 -and -not $buildFailed -and -not $noTests -and -not $noOutput) {
+        if ($ranTotal -eq 0 -and -not $buildFailed -and -not $undetermined -and -not $noTests -and -not $noOutput) {
           Write-Host "::warning title=UnitTests::No test ran in this repository: every discovered test carries [Category(`"$category`")]."
         }
 
@@ -323,11 +345,14 @@ runs:
         # `dotnet test` writes a results file with total=0 and exits 0 whether
         # the project is empty or the filter matched nothing. Counters tell the
         # two apart; file presence does not.
-        if ($buildFailed) { Write-Host "::error title=UnitTests::Build failed for project(s): $($buildFailed -join ', ')" }
-        if ($noTests)     { Write-Host "::error title=UnitTests::No test found in project(s): $($noTests -join ', ') . The project compiled but declares no test. Remove the project or add tests." }
-        if ($noOutput)    { Write-Host "::error title=UnitTests::No test output from project(s): $($noOutput -join ', ') . The run produced no .trx, which indicates a runner load failure." }
-        if ($testFailed)  { Write-Host "::error title=UnitTests::Test runs failed for project(s): $($testFailed -join ', ')" }
-        if ($buildFailed -or $noTests -or $noOutput -or $testFailed) { exit 1 }
+        if ($buildFailed)  { Write-Host "::error title=UnitTests::Build failed for project(s): $($buildFailed -join ', ')" }
+        foreach ($n in $undetermined) {
+          Write-Host "::error title=UnitTests::could not determine test count for $n . ``dotnet test --list-tests`` neither listed a test nor reported that none was available, so the project cannot be judged. This is a fault in the check or in the project's test host, not evidence about its tests."
+        }
+        if ($noTests)      { Write-Host "::error title=UnitTests::No test found in project(s): $($noTests -join ', ') . The project compiled but declares no test. Remove the project or add tests." }
+        if ($noOutput)     { Write-Host "::error title=UnitTests::No test output from project(s): $($noOutput -join ', ') . The run produced no .trx, which indicates a runner load failure." }
+        if ($testFailed)   { Write-Host "::error title=UnitTests::Test runs failed for project(s): $($testFailed -join ', ')" }
+        if ($buildFailed -or $undetermined -or $noTests -or $noOutput -or $testFailed) { exit 1 }
 
     - name: Upload test results (TRX)
       if: always() && hashFiles('TestResults/**/*.trx') != ''
