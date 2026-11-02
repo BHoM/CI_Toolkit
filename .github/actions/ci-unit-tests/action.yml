@@ -255,14 +255,24 @@ runs:
           # than zero. Reading an unparseable listing as "no tests" would turn
           # a tooling change into a fleet-wide red that looks like a repository
           # defect, so it gets a message of its own.
+          #
+          # The marker alone is not enough. Measured on sandbox run 41441469327:
+          # when the test host fails to start, VSTest prints the marker, then an
+          # exception and its stack trace, and still exits 0. Every line of that
+          # trace is indented, so a naive count read six "tests" out of a project
+          # with two. Hence the exception check, and the stop at the first blank
+          # line that terminates a real listing.
           $discovered = 0
           $listRead   = $false
-          if ($listExit -eq 0) {
+          if ($listExit -eq 0 -and $listOut -notmatch 'Exception' -and $listOut -notmatch 'Please check the diagnostic logs') {
             $lines  = $listOut -split "`r?`n"
             $marker = [Array]::FindIndex([string[]]$lines, [Predicate[string]]{ param($l) $l -match 'The following Tests are available' })
             if ($marker -ge 0 -and $marker -lt ($lines.Count - 1)) {
-              $discovered = @($lines[($marker + 1)..($lines.Count - 1)] | Where-Object { $_ -match '^\s+\S' }).Count
-              $listRead   = $discovered -gt 0
+              foreach ($l in $lines[($marker + 1)..($lines.Count - 1)]) {
+                if ($l -notmatch '^\s+\S') { break }
+                $discovered++
+              }
+              $listRead = $discovered -gt 0
             } elseif ($listOut -match 'No test is available in') {
               $listRead = $true
             }
