@@ -27,6 +27,21 @@ inputs:
       Test_Toolkit repository (owner/repo). Override to point at a fork.
     required: false
     default: "BHoM/Test_Toolkit"
+  dotnet_version:
+    description: >
+      SDK pinned for both the dependency build and the caller's test build.
+      Written to a generated global.json at the workspace root, because
+      setup-dotnet installs a version but does not select it: without the
+      pin `dotnet test` takes the newest SDK on the runner image.
+    required: false
+    default: '8.0'
+  external_category:
+    description: >
+      NUnit category excluded from the run. Tests needing software a hosted
+      runner cannot have (Autodesk Robot, Dlubal RFEM 6) carry this category;
+      excluding them is reported per project rather than passing silently.
+    required: false
+    default: 'RequiresExternalSoftware'
 
 runs:
   using: composite
@@ -43,27 +58,96 @@ runs:
         patterns: '*.cs *.csproj *.sln *.props *.targets'
         skip_if_not_pr: 'false'
 
-    # Convention: tests live in .ci/unit-tests/<RepoName>_Tests.sln.
-    - name: Discover test solution
+    # Convention: tests live somewhere under .ci/unit-tests. The directory is
+    # the contract; its internal layout is not. Projects are selected by being
+    # test projects, not by filename and not through a .sln, because neither
+    # holds across the fleet: three repos name the project `*_Test.csproj`
+    # (singular), two keep the solution a directory deeper, and two have no
+    # solution at all.
+    - name: Discover test projects
       id: test_check
       if: steps.changed.outputs.count != '0'
       shell: pwsh
+      env:
+        PROJECT_LIST: ${{ runner.temp }}/ci-unit-tests-projects.txt
       run: |
-        $slns = Get-ChildItem -Path ".ci/unit-tests" -Filter "*.sln" -ErrorAction SilentlyContinue
-
-        if (-not $slns) {
-          Write-Host "::warning::No test solution found under .ci/unit-tests/. Unit test step skipped."
+        $root = ".ci/unit-tests"
+        if (-not (Test-Path $root)) {
+          Write-Host "::warning title=UnitTests::No .ci/unit-tests directory. Unit test step skipped."
           "found=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           exit 0
         }
 
-        if ($slns.Count -gt 1) {
-          Write-Host "::warning::Multiple solutions found under .ci/unit-tests/. Using: $($slns[0].Name)"
+        # A project is a test project when it can host a test run: the VSTest
+        # entry point (Microsoft.NET.Test.Sdk), an NUnit adapter, or an explicit
+        # IsTestProject. Source and fixture projects sitting in the same tree
+        # carry none of these, which is what keeps them out.
+        $candidates = Get-ChildItem -Path $root -Filter "*.csproj" -Recurse -ErrorAction SilentlyContinue |
+          Where-Object { $_.FullName -notmatch '\\(bin|obj)\\' }
+
+        $projects = @()
+        foreach ($c in $candidates) {
+          $xml = Get-Content $c.FullName -Raw -ErrorAction SilentlyContinue
+          if (-not $xml) { continue }
+          if ($xml -imatch 'Include\s*=\s*"Microsoft\.NET\.Test\.Sdk"' -or
+              $xml -imatch 'Include\s*=\s*"NUnit3TestAdapter"' -or
+              $xml -imatch '<IsTestProject>\s*true\s*</IsTestProject>') {
+            $projects += $c.FullName
+          }
         }
-        $sln = $slns[0].FullName
-        "found=true"    | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-        "solution=$sln" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-        Write-Host "::notice::Test solution discovered: $sln"
+        $projects = $projects | Sort-Object
+
+        if (-not $projects) {
+          Write-Host "::error title=UnitTests::.ci/unit-tests exists but contains no test project. A test project references Microsoft.NET.Test.Sdk or NUnit3TestAdapter, or sets <IsTestProject>true</IsTestProject>."
+          exit 1
+        }
+
+        $projects | Set-Content -Path $env:PROJECT_LIST -Encoding utf8
+        "found=true"                 | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+        "count=$($projects.Count)"   | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+        Write-Host "::notice title=UnitTests::Discovered $($projects.Count) test project(s)"
+        foreach ($p in $projects) { Write-Host "  $(Resolve-Path -Relative $p)" }
+
+    # Diagnostic only, never fails the check. Reports where the new selection
+    # differs from what the previous .sln-driven implementation would have
+    # picked, so a repo whose set changes is visible rather than silent.
+    - name: Compare against the solution-driven selection
+      if: steps.test_check.outputs.found == 'true'
+      shell: pwsh
+      env:
+        PROJECT_LIST: ${{ runner.temp }}/ci-unit-tests-projects.txt
+      run: |
+        $new = @(Get-Content $env:PROJECT_LIST | Where-Object { $_ })
+
+        # Exactly the previous behaviour: non-recursive .sln lookup, first
+        # match, quoted paths ending in Tests.csproj.
+        $slns = Get-ChildItem -Path ".ci/unit-tests" -Filter "*.sln" -ErrorAction SilentlyContinue
+        $old  = @()
+        if ($slns) {
+          $sln    = $slns[0].FullName
+          $slnDir = Split-Path $sln -Parent
+          $old = @(Select-String -Path $sln -Pattern '"(?<p>[^"]+Tests\.csproj)"' | ForEach-Object {
+            $rel = $_.Matches[0].Groups['p'].Value -replace '\\','/'
+            $abs = Join-Path $slnDir $rel
+            if (Test-Path $abs) { (Resolve-Path $abs).Path }
+          })
+        }
+
+        $onlyNew = @($new | Where-Object { $old -notcontains $_ })
+        $onlyOld = @($old | Where-Object { $new -notcontains $_ })
+
+        if (-not $slns) {
+          Write-Host "::notice title=UnitTests::No .sln directly under .ci/unit-tests, so the previous implementation selected nothing here and ran no tests."
+        }
+        if ($onlyNew) {
+          Write-Host "::notice title=UnitTests::Newly discovered, not selected by the solution: $(($onlyNew | ForEach-Object { Split-Path $_ -Leaf }) -join ', ')"
+        }
+        if ($onlyOld) {
+          Write-Host "::warning title=UnitTests::Listed in the solution but not detected as a test project: $(($onlyOld | ForEach-Object { Split-Path $_ -Leaf }) -join ', ')"
+        }
+        if ($slns -and -not $onlyNew -and -not $onlyOld) {
+          Write-Host "::notice title=UnitTests::Selection matches the solution-driven selection."
+        }
 
     - name: Mint dependency token
       id: dep-token
@@ -80,9 +164,31 @@ runs:
       with:
         mode:             caller
         additional_seeds: ${{ inputs.test_toolkit_repo }}
-        dotnet_version:   '8.0'
+        dotnet_version:   ${{ inputs.dotnet_version }}
         configuration:    Release
         token:            ${{ steps.dep-token.outputs.token }}
+
+    # resolve-dependencies pins the SDK at its own clone root (C:\bhom-deps),
+    # which governs the dependency build and nothing else. The caller's test
+    # build runs in the workspace, so it needs its own pin: setup-dotnet
+    # installs 8.0 but leaves the newest image SDK selected. Measured on
+    # windows-2025-vs2026: `dotnet --version` reported 10.0.402 with
+    # setup-dotnet asking for 8.0.
+    - name: Pin SDK for the caller workspace
+      if: steps.test_check.outputs.found == 'true'
+      shell: pwsh
+      env:
+        DOTNET_VERSION: ${{ inputs.dotnet_version }}
+      run: |
+        if (Test-Path "global.json") {
+          Write-Host "::notice title=UnitTests::Repository supplies its own global.json; leaving it in place."
+        } else {
+          $sdkVersion = $env:DOTNET_VERSION
+          if ($sdkVersion -match '^\d+\.\d+$') { $sdkVersion = "$sdkVersion.0" }
+          [ordered]@{ sdk = [ordered]@{ version = $sdkVersion; rollForward = "latestMinor" } } `
+            | ConvertTo-Json | Set-Content "global.json" -Encoding utf8
+        }
+        Write-Host "::notice title=UnitTests::SDK in use: $(dotnet --version)"
 
     # Per-project invocation, not `dotnet test <sln>`. BHoM `_Tests.sln` files
     # map every project's `Test|Any CPU` to `Debug|Any CPU`, so a solution-level
@@ -100,40 +206,128 @@ runs:
         # major (currently .NET 8) for deterministic behaviour across image
         # refreshes; `LatestMajor` would track the newest installed runtime.
         DOTNET_ROLL_FORWARD: Major
+        PROJECT_LIST: ${{ runner.temp }}/ci-unit-tests-projects.txt
+        EXTERNAL_CATEGORY: ${{ inputs.external_category }}
       run: |
-        $sln    = "${{ steps.test_check.outputs.solution }}"
-        $slnDir = Split-Path $sln -Parent
-        # Filter to `*Tests.csproj`. The solution also lists source projects as
-        # ProjectReferences, on which `dotnet test` would exit 0 with no output.
-        $projects = Select-String -Path $sln -Pattern '"(?<p>[^"]+Tests\.csproj)"' |
-          ForEach-Object { (Resolve-Path (Join-Path $slnDir ($_.Matches[0].Groups['p'].Value -replace '\\','/'))).Path }
-        if (-not $projects) {
-          Write-Host "::error::No *Tests.csproj files found in $sln"
-          exit 1
-        }
-        Write-Host "::notice::Discovered $($projects.Count) test project(s)"
+        $projects = @(Get-Content $env:PROJECT_LIST | Where-Object { $_ })
+        $category = $env:EXTERNAL_CATEGORY
+        $filter   = "TestCategory!=$category"
 
-        $failed = @()
-        $zero   = @()
+        $buildFailed  = @()   # did not compile
+        $noTests      = @()   # compiled, contains no test at all
+        $noOutput     = @()   # ran, produced no .trx: runner load failure
+        $testFailed   = @()   # at least one test failed
+        $allExcluded  = @()   # has tests, every one carries the category
+        $rows         = @()
+        $ranTotal     = 0
+
         foreach ($proj in $projects) {
-          $name   = [IO.Path]::GetFileNameWithoutExtension($proj)
-          $before = (Get-ChildItem TestResults -Filter *.trx -Recurse -EA SilentlyContinue | Measure-Object).Count
+          $name = [IO.Path]::GetFileNameWithoutExtension($proj)
 
-          Write-Host "::group::dotnet test $name"
-          dotnet test $proj -c Test --collect:"XPlat Code Coverage" --logger "trx;LogFileName=$name.trx" --results-directory TestResults
+          # Build separately so a compile failure is reported as one, rather
+          # than arriving as an opaque non-zero exit from `dotnet test`.
+          Write-Host "::group::dotnet build $name"
+          dotnet build $proj -c Test --nologo
+          $buildExit = $LASTEXITCODE
+          Write-Host "::endgroup::"
+          if ($buildExit -ne 0) {
+            $buildFailed += $name
+            $rows += [pscustomobject]@{ Project = $name; Discovered = '-'; Ran = '-'; Excluded = '-'; Failed = '-'; Result = 'build failed' }
+            continue
+          }
+
+          # Unfiltered discovery count. The run below is filtered, so its TRX
+          # cannot tell "no tests here" from "all of them were excluded", and
+          # those two need opposite verdicts. `--list-tests` answers it for one
+          # extra invocation against an already-built project.
+          Write-Host "::group::dotnet test $name --list-tests"
+          $listOut = (dotnet test $proj -c Test --no-build --list-tests 2>&1 | Out-String)
+          Write-Host $listOut
+          Write-Host "::endgroup::"
+
+          $discovered = 0
+          $lines  = $listOut -split "`r?`n"
+          $marker = [Array]::FindIndex([string[]]$lines, [Predicate[string]]{ param($l) $l -match 'The following Tests are available' })
+          if ($marker -ge 0 -and $marker -lt ($lines.Count - 1)) {
+            $discovered = @($lines[($marker + 1)..($lines.Count - 1)] | Where-Object { $_ -match '^\s+\S' }).Count
+          }
+
+          if ($discovered -eq 0) {
+            $noTests += $name
+            $rows += [pscustomobject]@{ Project = $name; Discovered = 0; Ran = 0; Excluded = 0; Failed = 0; Result = 'no tests' }
+            continue
+          }
+
+          Write-Host "::group::dotnet test $name --filter $filter"
+          dotnet test $proj -c Test --no-build --filter $filter `
+            --collect:"XPlat Code Coverage" `
+            --logger "trx;LogFileName=$name.trx" --results-directory TestResults
           $exit = $LASTEXITCODE
           Write-Host "::endgroup::"
 
-          $after = (Get-ChildItem TestResults -Filter *.trx -Recurse -EA SilentlyContinue | Measure-Object).Count
-          if ($exit -ne 0)         { $failed += $name }
-          elseif ($after -eq $before) { $zero += $name }
+          $trx = Join-Path "TestResults" "$name.trx"
+          if (-not (Test-Path $trx)) {
+            $noOutput += $name
+            $rows += [pscustomobject]@{ Project = $name; Discovered = $discovered; Ran = '-'; Excluded = '-'; Failed = '-'; Result = 'no test output' }
+            continue
+          }
+
+          [xml]$trxXml = Get-Content $trx
+          $counters = $trxXml.TestRun.ResultSummary.Counters
+          $total    = [int]$counters.total
+          $executed = [int]$counters.executed
+          $failedN  = [int]$counters.failed
+          $excluded = $discovered - $total
+          $ranTotal += $executed
+
+          if ($exit -ne 0 -or $failedN -gt 0) {
+            $testFailed += $name
+            $result = 'failed'
+          } elseif ($total -eq 0) {
+            $allExcluded += $name
+            $result = 'all excluded'
+          } else {
+            $result = 'passed'
+          }
+
+          $rows += [pscustomobject]@{ Project = $name; Discovered = $discovered; Ran = $executed; Excluded = $excluded; Failed = $failedN; Result = $result }
+
+          if ($excluded -gt 0) {
+            Write-Host "::notice title=UnitTests::${name}: skipped: $excluded tests require external software"
+          }
         }
 
-        # A `*Tests.csproj` that exits 0 with no `.trx` indicates broken discovery
-        # (missing test framework reference, silent runner load failure). Fail
-        # here rather than report green on broken-discovery PRs.
-        if ($zero)   { Write-Host "::error title=UnitTests::No test output from project(s): $($zero -join ', ') . Likely zero tests discovered, or a runner load failure. A test project must produce at least one test result."; exit 1 }
-        if ($failed) { Write-Host "::error title=UnitTests::Test runs failed for project(s): $($failed -join ', ')"; exit 1 }
+        # Per-project table, in the job summary and the log.
+        $table = $rows | Format-Table -AutoSize | Out-String
+        Write-Host $table
+        "### Unit tests"                                                          | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        ""                                                                        | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        "Filter: ``$filter``"                                                     | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        ""                                                                        | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        "| Project | Discovered | Ran | Excluded | Failed | Result |"              | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        "|---|---:|---:|---:|---:|---|"                                           | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        foreach ($r in $rows) {
+          "| $($r.Project) | $($r.Discovered) | $($r.Ran) | $($r.Excluded) | $($r.Failed) | $($r.Result) |" |
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        }
+
+        foreach ($n in $allExcluded) {
+          Write-Host "::notice title=UnitTests::${n}: every test carries [Category(`"$category`")], so none ran. This is a pass."
+        }
+        if ($ranTotal -eq 0 -and -not $buildFailed -and -not $noTests -and -not $noOutput) {
+          Write-Host "::warning title=UnitTests::No test ran in this repository: every discovered test carries [Category(`"$category`")]."
+        }
+
+        # A test project with no test is a defect in the project, not a pass.
+        # The previous guard compared .trx file counts, which never caught this:
+        # `dotnet test` writes a results file with total=0 and exits 0 whether
+        # the project is empty or the filter matched nothing. Counters tell the
+        # two apart; file presence does not.
+        if ($buildFailed) { Write-Host "::error title=UnitTests::Build failed for project(s): $($buildFailed -join ', ')" }
+        if ($noTests)     { Write-Host "::error title=UnitTests::No test found in project(s): $($noTests -join ', ') . The project compiled but declares no test. Remove the project or add tests." }
+        if ($noOutput)    { Write-Host "::error title=UnitTests::No test output from project(s): $($noOutput -join ', ') . The run produced no .trx, which indicates a runner load failure." }
+        if ($testFailed)  { Write-Host "::error title=UnitTests::Test runs failed for project(s): $($testFailed -join ', ')" }
+        if ($buildFailed -or $noTests -or $noOutput -or $testFailed) { exit 1 }
 
     - name: Upload test results (TRX)
       if: always() && hashFiles('TestResults/**/*.trx') != ''
