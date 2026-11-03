@@ -1,10 +1,10 @@
-# Invoke-UnitTestProjects.Tests.ps1 — Pester tests for the ci-unit-tests run's decisions.
+# Invoke-UnitTestProjects.Tests.ps1: Pester tests for the ci-unit-tests run's decisions.
 #
 # The fixtures are real outputs recorded from purpose-built probe projects, one per project
 # state: `dotnet test --list-tests` output as listing-<case>.txt, and the .trx reduced to the
 # elements the script reads as results-<case>.trx. Paths in the listings were replaced with a
-# neutral D:\a\Sample\Sample\ checkout. Two results files are synthetic because no project
-# produces them on demand: one without counters and one that is not XML.
+# neutral D:\a\Sample\Sample\ checkout. Three results files are synthetic because no project
+# produces them on demand: one without counters, one that is not XML, and one that is empty.
 #
 # Only the pure functions are tested. Invoke-UnitTestProjects runs dotnet and is covered by
 # running the action.
@@ -116,6 +116,10 @@ Describe 'Read-TrxResult' {
 
     It 'returns $null for a results file that is not XML' {
         Read-TrxResult -Path (Get-ResultsPath 'not-xml') | Should -BeNullOrEmpty
+    }
+
+    It 'returns $null for an empty results file rather than throwing' {
+        Read-TrxResult -Path (Get-ResultsPath 'empty') | Should -BeNullOrEmpty
     }
 }
 
@@ -240,17 +244,61 @@ Describe 'Get-RunReport' {
         $script:failing     = Get-RecordedVerdict 'failing' -TestExitCode 1
         $script:noneRan     = Get-RecordedVerdict 'none-executed'
         $script:built       = Get-ProjectVerdict -Name 'Broken' -BuildExitCode 1
+
+        $listed = [pscustomobject]@{ Read = $true; Discovered = 2 }
+        $script:noTests = Get-ProjectVerdict -Name 'Empty' -BuildExitCode 0 `
+            -Listing (Read-TestListing -Output (Get-Listing 'no-tests') -ExitCode 0)
+        $script:unread  = Get-ProjectVerdict -Name 'Unread' -BuildExitCode 0 `
+            -Listing (Read-TestListing -Output (Get-Listing 'unreadable-listing') -ExitCode 0)
+        $script:noOut   = Get-ProjectVerdict -Name 'NoTrx' -BuildExitCode 0 -Listing $listed -TrxFound $false
+        $script:badTrx  = Get-ProjectVerdict -Name 'BadTrx' -BuildExitCode 0 -Listing $listed -TrxFound $true `
+            -Results (Read-TrxResult -Path (Get-ResultsPath 'no-counters'))
+
+        $script:byCategory = @{
+            TestFailed = $failing; NoneExecuted = $noneRan; BuildFailed = $built; NoTests = $noTests
+            Undetermined = $unread; NoOutput = $noOut; BadResults = $badTrx
+        }
     }
 
     It 'passes when every project passed or was all excluded' {
         (Get-RunReport -Verdicts @($allExcluded, $someNotRun) -Category 'RequiresExternalSoftware').ExitCode | Should -Be 0
     }
 
-    It 'fails on a <Case>' -ForEach @(
-        @{ Case = 'failed test' }, @{ Case = 'none executed' }, @{ Case = 'build failed' }
+    # Every failing category, beside a passing project, so dropping any one of them from the
+    # failing set fails this test.
+    It 'fails when one project is <Category>' -ForEach @(
+        @{ Category = 'TestFailed' }, @{ Category = 'NoneExecuted' }, @{ Category = 'BuildFailed' },
+        @{ Category = 'NoTests' }, @{ Category = 'Undetermined' }, @{ Category = 'NoOutput' },
+        @{ Category = 'BadResults' }
     ) {
-        $v = switch ($Case) { 'failed test' { $failing } 'none executed' { $noneRan } 'build failed' { $built } }
+        $v = $byCategory[$Category]
+        $v.Category | Should -Be $Category
         (Get-RunReport -Verdicts @($someNotRun, $v) -Category 'RequiresExternalSoftware').ExitCode | Should -Be 1
+    }
+
+    # A repository in which nothing ran and nothing was all excluded. Reaches the "no test ran"
+    # check with no all-excluded project, which must not throw.
+    Context 'a report whose only project is <Category>' -ForEach @(
+        @{ Category = 'NoTests';      Row = '| Empty | 0 | 0 | 0 | 0 | 0 | no tests |'; Message = '::error title=UnitTests::No test found in project(s): Empty . The project compiled but declares no test. Remove the project or add tests.' }
+        @{ Category = 'NoneExecuted'; Row = '| none-executed-project | 2 | 0 | 0 | 2 | 0 | none executed |'; Message = '::error title=UnitTests::no tests executed in none-executed-project (2 discovered, 2 not run). The filter admitted these tests and none of them ran, so this project examined nothing. Tag them [Category("C")] if they need software a runner cannot have, otherwise fix what is stopping them.' }
+        @{ Category = 'BuildFailed';  Row = '| Broken | - | - | - | - | - | build failed |'; Message = '::error title=UnitTests::Build failed for project(s): Broken' }
+    ) {
+        BeforeAll {
+            $script:report = Get-RunReport -Verdicts @($byCategory[$Category]) -Category 'C'
+        }
+
+        It 'fails' {
+            $report.ExitCode | Should -Be 1
+        }
+
+        It 'gives exactly its error, and no "no test ran" warning' {
+            $report.Annotations | Should -Be @($Message)
+        }
+
+        It 'still writes the table' {
+            $report.SummaryLines.Count | Should -Be 7
+            $report.SummaryLines[6]    | Should -Be $Row
+        }
     }
 
     It 'writes the table with one row per project, in order' {

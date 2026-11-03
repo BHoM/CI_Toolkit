@@ -1,5 +1,5 @@
-# Invoke-UnitTestProjects.ps1 — the ci-unit-tests run: build, list, run and judge each test
-# project, then write the per-project table and the annotations.
+# Invoke-UnitTestProjects.ps1 is the ci-unit-tests run. It builds, lists, runs and judges each
+# test project, then writes the per-project table and the annotations.
 #
 # Dot-sourced by .github/actions/ci-unit-tests/action.yml and by
 # .github/scripts/tests/Invoke-UnitTestProjects.Tests.ps1. Defines functions and sets the
@@ -106,13 +106,15 @@ function Read-TrxResult {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Path)
 
+    # An empty file reads as $null, and [xml]$null is $null, so it is checked here with the
+    # parse rather than after it, where its DocumentElement would throw under strict mode.
     try {
         [xml]$trx = Get-Content -Path $Path -Raw
+        if (-not $trx -or -not $trx.DocumentElement) { return $null }
     } catch {
         Write-Host "::debug::TRX $Path did not parse: $($_.Exception.Message)"
         return $null
     }
-    if (-not $trx.DocumentElement) { return $null }
 
     $counters = $trx.SelectSingleNode("/*[local-name()='TestRun']/*[local-name()='ResultSummary']/*[local-name()='Counters']")
     if (-not $counters -or -not $counters.HasAttribute('total')) { return $null }
@@ -271,7 +273,8 @@ function Get-RunReport {
     }
 
     $annotations = @()
-    $allExcluded = & $of 'AllExcluded'
+    # @() because a pipeline returning nothing is $null, and $null.Count throws under strict mode.
+    $allExcluded = @(& $of 'AllExcluded')
     foreach ($v in $allExcluded) {
         $annotations += "::notice title=UnitTests::$($v.Name): every test carries [Category(`"$Category`")], so none ran. This is a pass."
     }
