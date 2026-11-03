@@ -1,7 +1,7 @@
 name: "CI Unit Tests"
 description: |
-  Discovers and runs unit tests for the caller repo, generating code coverage reports
-  and posting results to the PR.
+  Discovers and runs unit tests for the caller repo. Results and coverage are
+  published as artifacts by the test runner and ReportGenerator.
 
 inputs:
   app_id:
@@ -14,12 +14,6 @@ inputs:
     default: ""
   fallback_token:
     description: Fallback token when App credentials are absent.
-    required: false
-    default: ""
-  pr_number:
-    description: >
-      PR number in the caller repo. Proxy workflows pass this so the
-      coverage comment targets the right PR in cross-org contexts.
     required: false
     default: ""
   test_toolkit_repo:
@@ -118,47 +112,6 @@ runs:
         "count=$($projects.Count)"   | Out-File -FilePath $env:GITHUB_OUTPUT -Append
         Write-Host "::notice title=UnitTests::Discovered $($projects.Count) test project(s)"
         foreach ($p in $projects) { Write-Host "  $(Resolve-Path -Relative $p)" }
-
-    # Diagnostic only, never fails the check. Reports where the new selection
-    # differs from what the previous .sln-driven implementation would have
-    # picked, so a repo whose set changes is visible rather than silent.
-    - name: Compare against the solution-driven selection
-      if: steps.test_check.outputs.found == 'true'
-      shell: pwsh
-      env:
-        PROJECT_LIST: ${{ runner.temp }}/ci-unit-tests-projects.txt
-      run: |
-        $new = @(Get-Content $env:PROJECT_LIST | Where-Object { $_ })
-
-        # Exactly the previous behaviour: non-recursive .sln lookup, first
-        # match, quoted paths ending in Tests.csproj.
-        $slns = Get-ChildItem -Path ".ci/unit-tests" -Filter "*.sln" -ErrorAction SilentlyContinue
-        $old  = @()
-        if ($slns) {
-          $sln    = $slns[0].FullName
-          $slnDir = Split-Path $sln -Parent
-          $old = @(Select-String -Path $sln -Pattern '"(?<p>[^"]+Tests\.csproj)"' | ForEach-Object {
-            $rel = $_.Matches[0].Groups['p'].Value -replace '\\','/'
-            $abs = Join-Path $slnDir $rel
-            if (Test-Path $abs) { (Resolve-Path $abs).Path }
-          })
-        }
-
-        $onlyNew = @($new | Where-Object { $old -notcontains $_ })
-        $onlyOld = @($old | Where-Object { $new -notcontains $_ })
-
-        if (-not $slns) {
-          Write-Host "::notice title=UnitTests::No .sln directly under .ci/unit-tests, so the previous implementation selected nothing here and ran no tests."
-        }
-        if ($onlyNew) {
-          Write-Host "::notice title=UnitTests::Newly discovered, not selected by the solution: $(($onlyNew | ForEach-Object { Split-Path $_ -Leaf }) -join ', ')"
-        }
-        if ($onlyOld) {
-          Write-Host "::warning title=UnitTests::Listed in the solution but not detected as a test project: $(($onlyOld | ForEach-Object { Split-Path $_ -Leaf }) -join ', ')"
-        }
-        if ($slns -and -not $onlyNew -and -not $onlyOld) {
-          Write-Host "::notice title=UnitTests::Selection matches the solution-driven selection."
-        }
 
     - name: Mint dependency token
       id: dep-token
@@ -329,10 +282,20 @@ runs:
             continue
           }
 
+          # The excluded tests never reach the results files, so vstest lists
+          # them by category, as written, beside the run's own output.
+          New-Item -ItemType Directory -Force -Path TestResults | Out-Null
+          foreach ($dll in [regex]::Matches($listOut, '(?m)^Test run for (.+?\.dll) \(')) {
+            dotnet vstest $dll.Groups[1].Value /ListFullyQualifiedTests `
+              "/ListTestsTargetPath:$(Join-Path $PWD "TestResults/$name.excluded.txt")" `
+              "/TestCaseFilter:TestCategory=$category" | Out-Null
+          }
+
           Write-Host "::group::dotnet test $name --filter $filter"
           dotnet test $proj -c Test --no-build --filter $filter `
             --collect:"XPlat Code Coverage" `
-            --logger "trx;LogFileName=$name.trx" --results-directory TestResults
+            --logger "trx;LogFileName=$name.trx" --logger "html;LogFileName=$name.html" `
+            --results-directory TestResults
           $exit = $LASTEXITCODE
           Write-Host "::endgroup::"
 
@@ -470,41 +433,58 @@ runs:
         if ($testFailed)   { Write-Host "::error title=UnitTests::Test runs failed for project(s): $($testFailed -join ', ')" }
         if ($buildFailed -or $undetermined -or $noTests -or $noneExecuted -or $noOutput -or $badResults -or $testFailed) { exit 1 }
 
-    - name: Upload test results (TRX)
-      if: always() && hashFiles('TestResults/**/*.trx') != ''
-      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+    - name: Upload test results
+      id: test_results
+      if: always() && hashFiles('TestResults/*.trx') != ''
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       with:
         name: test-results-${{ github.run_id }}
-        path: TestResults/
+        path: |
+          TestResults/*.trx
+          TestResults/*.html
+          TestResults/*.excluded.txt
         retention-days: 7
 
-    - name: Generate code coverage report
-      id: generate_coverage
-      if: always() && hashFiles('TestResults/**/coverage.cobertura.xml') != ''
+    # ReportGenerator merges the per-project reports and keeps only files in
+    # this checkout outside .ci. Dependencies are cloned outside the checkout,
+    # so their source never reaches the report. Reporting only: nothing here
+    # can change the check's outcome.
+    - name: Coverage report
+      id: coverage
+      if: always() && hashFiles('TestResults/*/coverage.cobertura.xml') != ''
       continue-on-error: true
       shell: pwsh
       run: |
-        New-Item -ItemType Directory -Force -Path ".config" | Out-Null
-        Set-Content -Path ".config/dotnet-tools.json" -Value '{
-          "version": 1,
-          "isRoot": true,
-          "tools": {
-            "dotnet-reportgenerator-globaltool": {
-              "version": "5.4.4",
-              "commands": ["reportgenerator"]
-            }
-          }
-        }'
-        dotnet tool restore
-        dotnet tool run reportgenerator -- "-reports:TestResults/*/coverage.cobertura.xml" "-targetdir:CodeCoverage" "-reporttypes:MarkdownSummaryGithub;Cobertura"
-        Get-Content CodeCoverage/SummaryGithub.md | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        $tools = Join-Path $env:RUNNER_TEMP 'reportgenerator'
+        dotnet tool install dotnet-reportgenerator-globaltool --version 5.4.4 --tool-path $tools
+        & (Join-Path $tools 'reportgenerator') "-reports:TestResults/*/coverage.cobertura.xml" `
+          "-targetdir:CodeCoverage" "-reporttypes:Html;JsonSummary" `
+          "-filefilters:+$env:GITHUB_WORKSPACE\*;-$env:GITHUB_WORKSPACE\.ci\*"
+        Move-Item CodeCoverage/Summary.json (Join-Path $env:RUNNER_TEMP 'coverage-summary.json') -Force
+        Remove-Item CodeCoverage/index.htm -ErrorAction SilentlyContinue
 
-    - name: Add Coverage PR Comment
-      if: always() && hashFiles('CodeCoverage/SummaryGithub.md') != '' && (github.event_name == 'pull_request' || inputs.pr_number)
+    - name: Upload the coverage report
+      id: coverage_report
+      if: always() && steps.coverage.outcome == 'success'
       continue-on-error: true
-      uses: marocchino/sticky-pull-request-comment@0ea0beb66eb9baf113663a64ec522f60e49231c0 # v3.0.4
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       with:
-        recreate: false
-        path: CodeCoverage/SummaryGithub.md
-        number: ${{ inputs.pr_number || github.event.pull_request.number }}
-        GITHUB_TOKEN: ${{ steps.dep-token.outputs.token }}
+        name: coverage-report-${{ github.run_id }}
+        path: CodeCoverage/
+        retention-days: 14
+
+    - name: Coverage and report links
+      if: always() && steps.test_check.outputs.found == 'true'
+      continue-on-error: true
+      shell: pwsh
+      env:
+        COVERAGE_URL: ${{ steps.coverage_report.outputs.artifact-url }}
+        RESULTS_URL: ${{ steps.test_results.outputs.artifact-url }}
+      run: |
+        $json = Join-Path $env:RUNNER_TEMP 'coverage-summary.json'
+        if (Test-Path $json) {
+          $s = (Get-Content $json -Raw | ConvertFrom-Json).summary
+          $branch = if ($null -ne $s.branchcoverage) { "$($s.branchcoverage)%" } else { 'n/a' }
+          "", "Coverage: line $($s.linecoverage)%, branch $branch" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        }
+        "", "Reports: [coverage]($env:COVERAGE_URL), [test results]($env:RESULTS_URL)" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
