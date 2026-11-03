@@ -393,13 +393,9 @@ runs:
         }
 
         if ($partialNotRun) {
-          ""                                                                      | Add-Content -Path $env:GITHUB_STEP_SUMMARY
-          "> **Not run.** These tests were admitted by the filter and the runner did not execute them, usually `Assert.Inconclusive` or `[Ignore]`. The check passed on the tests that did run." |
+          $names = @(foreach ($p in $partialNotRun) { foreach ($t in $p.Names) { "- ``$($p.Name)``: $t" } })
+          @("", "<details><summary>Not run ($($names.Count))</summary>", "") + $names + @("", "</details>") |
             Add-Content -Path $env:GITHUB_STEP_SUMMARY
-          ""                                                                      | Add-Content -Path $env:GITHUB_STEP_SUMMARY
-          foreach ($p in $partialNotRun) {
-            foreach ($t in $p.Names) { "- ``$($p.Name)``: $t" | Add-Content -Path $env:GITHUB_STEP_SUMMARY }
-          }
         }
 
         foreach ($n in $allExcluded) {
@@ -482,9 +478,11 @@ runs:
         RESULTS_URL: ${{ steps.test_results.outputs.artifact-url }}
       run: |
         $json = Join-Path $env:RUNNER_TEMP 'coverage-summary.json'
-        if (Test-Path $json) {
-          $s = (Get-Content $json -Raw | ConvertFrom-Json).summary
-          $branch = if ($null -ne $s.branchcoverage) { "$($s.branchcoverage)%" } else { 'n/a' }
-          "", "Coverage: line $($s.linecoverage)%, branch $branch" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        $s = if (Test-Path $json) { (Get-Content $json -Raw | ConvertFrom-Json).summary }
+        $coverage = 'not available'
+        if ($s.coverablelines -gt 0) {
+          $branch   = if ($null -ne $s.branchcoverage) { "$($s.branchcoverage)%" } else { 'n/a' }
+          $coverage = "line $($s.linecoverage)%, branch $branch"
         }
+        "", "Coverage: $coverage" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
         "", "Reports: [coverage]($env:COVERAGE_URL), [test results]($env:RESULTS_URL)" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
