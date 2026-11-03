@@ -1,0 +1,11 @@
+Test run for D:\a\Sample\Sample\.ci\unit-tests\ExcludedNames_Tests\bin\Test\net8.0\ExcludedNames_Tests.dll (.NETCoreApp,Version=v8.0)
+The following Tests are available:
+    Excluded custom (name)
+    Custom name with.dot
+    Same
+    Same
+    GenericExcluded
+    GenericRuns
+    GenericExcluded
+    GenericRuns
+    Typed<Int32>(1)

@@ -1,0 +1,23 @@
+<?xml version='1.0' encoding='utf-8'?>
+<TestRun xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
+  <Results>
+    <UnitTestResult testName="Adds(10,15,25)" outcome="Passed" />
+    <UnitTestResult testName="Combinatorial(2,20)" outcome="Passed" />
+    <UnitTestResult testName="Combinatorial(1,20)" outcome="Passed" />
+    <UnitTestResult testName="Combinatorial(2,10)" outcome="Passed" />
+    <UnitTestResult testName="Doubles([3, 6])" outcome="Passed" />
+    <UnitTestResult testName="Adds(1,1,2)" outcome="Passed" />
+    <UnitTestResult testName="IgnoredSource(1)" outcome="NotExecuted" />
+    <UnitTestResult testName="Combinatorial(3,20)" outcome="Passed" />
+    <UnitTestResult testName="Combinatorial(1,10)" outcome="Passed" />
+    <UnitTestResult testName="Adds(2,3,5)" outcome="Passed" />
+    <UnitTestResult testName="Doubles([1, 2])" outcome="Passed" />
+    <UnitTestResult testName="Doubles([4, 8])" outcome="Passed" />
+    <UnitTestResult testName="IgnoredSource(2)" outcome="NotExecuted" />
+    <UnitTestResult testName="Doubles([2, 4])" outcome="Passed" />
+    <UnitTestResult testName="Combinatorial(3,10)" outcome="Passed" />
+  </Results>
+  <ResultSummary outcome="Completed">
+    <Counters total="15" executed="13" passed="13" failed="0" error="0" timeout="0" aborted="0" inconclusive="0" passedButRunAborted="0" notRunnable="0" notExecuted="0" disconnected="0" warning="0" completed="0" inProgress="0" pending="0" />
+  </ResultSummary>
+</TestRun>
