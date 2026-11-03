@@ -429,9 +429,13 @@ runs:
         if ($testFailed)   { Write-Host "::error title=UnitTests::Test runs failed for project(s): $($testFailed -join ', ')" }
         if ($buildFailed -or $undetermined -or $noTests -or $noneExecuted -or $noOutput -or $badResults -or $testFailed) { exit 1 }
 
+    # Every step from here to the end is reporting only. Each is
+    # continue-on-error, so none can change the check's outcome, which the
+    # test run above has already decided.
     - name: Upload test results
       id: test_results
       if: always() && hashFiles('TestResults/*.trx') != ''
+      continue-on-error: true
       uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       with:
         name: test-results-${{ github.run_id }}
@@ -443,8 +447,7 @@ runs:
 
     # ReportGenerator merges the per-project reports and keeps only files in
     # this checkout outside .ci. Dependencies are cloned outside the checkout,
-    # so their source never reaches the report. Reporting only: nothing here
-    # can change the check's outcome.
+    # so their source never reaches the report.
     - name: Coverage report
       id: coverage
       if: always() && hashFiles('TestResults/*/coverage.cobertura.xml') != ''
@@ -479,10 +482,11 @@ runs:
       run: |
         $json = Join-Path $env:RUNNER_TEMP 'coverage-summary.json'
         $s = if (Test-Path $json) { (Get-Content $json -Raw | ConvertFrom-Json).summary }
-        $coverage = 'not available'
-        if ($s.coverablelines -gt 0) {
-          $branch   = if ($null -ne $s.branchcoverage) { "$($s.branchcoverage)%" } else { 'n/a' }
-          $coverage = "line $($s.linecoverage)%, branch $branch"
-        }
+        $coverage = if (-not $s) { 'no data collected' }
+                    elseif ($s.coverablelines -eq 0) { 'no coverable lines' }
+                    else { "line $($s.linecoverage)%, branch $(if ($null -ne $s.branchcoverage) { "$($s.branchcoverage)%" } else { 'n/a' })" }
         "", "Coverage: $coverage" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
-        "", "Reports: [coverage]($env:COVERAGE_URL), [test results]($env:RESULTS_URL)" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        $links = @()
+        if ($env:COVERAGE_URL) { $links += "[coverage]($env:COVERAGE_URL)" }
+        if ($env:RESULTS_URL)  { $links += "[test results]($env:RESULTS_URL)" }
+        if ($links) { "", "Reports: $($links -join ', ')" | Add-Content -Path $env:GITHUB_STEP_SUMMARY }
