@@ -158,11 +158,8 @@ runs:
         }
         Write-Host "::notice title=UnitTests::SDK in use: $(dotnet --version)"
 
-    # Per-project invocation, not `dotnet test <sln>`. BHoM `_Tests.sln` files
-    # map every project's `Test|Any CPU` to `Debug|Any CPU`, so a solution-level
-    # build silently compiles Debug and the test host (which only has an
-    # executable TFM under Test) is never produced. Iterating `.csproj` files
-    # honours `--configuration Test` correctly.
+    # Build, list, run and judge each test project. The logic and the reasons
+    # for it are in the script, which has its own tests.
     - name: Run tests
       id: run_tests
       if: steps.test_check.outputs.found == 'true'
@@ -176,258 +173,20 @@ runs:
         DOTNET_ROLL_FORWARD: Major
         # The test count is read out of `--list-tests` prose, and VSTest
         # localises that prose to the machine's UI language. Pin it so the
-        # markers below are the strings the runner actually prints.
+        # markers the script matches are the strings the runner prints.
         DOTNET_CLI_UI_LANGUAGE: en
         PROJECT_LIST: ${{ runner.temp }}/ci-unit-tests-projects.txt
         EXTERNAL_CATEGORY: ${{ inputs.external_category }}
       run: |
-        $projects = @(Get-Content $env:PROJECT_LIST | Where-Object { $_ })
-        $category = $env:EXTERNAL_CATEGORY
-        $filter   = "TestCategory!=$category"
+        # GITHUB_ACTION_PATH is .github/actions/ci-unit-tests, so ../../scripts is
+        # .github/scripts, the same path the other actions use for shared scripts.
+        . (Join-Path $env:GITHUB_ACTION_PATH "../../scripts/Invoke-UnitTestProjects.ps1")
 
-        $buildFailed   = @()   # did not compile
-        $undetermined  = @()   # `--list-tests` could not be read
-        $noTests       = @()   # compiled, contains no test at all
-        $noOutput      = @()   # ran, produced no .trx: runner load failure
-        $testFailed    = @()   # at least one test failed
-        $allExcluded   = @()   # has tests, every one carries the category
-        $noneExecuted  = @()   # tests survived the filter, none of them ran
-        $partialNotRun = @()   # some ran, some did not
-        $badResults    = @()   # .trx present but carries no counters
-        $countMismatch = @()   # listing and run disagree on case expansion
-        $rows          = @()
-        $ranTotal      = 0
-
-        foreach ($proj in $projects) {
-          $name = [IO.Path]::GetFileNameWithoutExtension($proj)
-
-          # Build separately so a compile failure is reported as one, rather
-          # than arriving as an opaque non-zero exit from `dotnet test`.
-          Write-Host "::group::dotnet build $name"
-          dotnet build $proj -c Test --nologo
-          $buildExit = $LASTEXITCODE
-          Write-Host "::endgroup::"
-          if ($buildExit -ne 0) {
-            $buildFailed += $name
-            $rows += [pscustomobject]@{ Project = $name; Discovered = '-'; Ran = '-'; Excluded = '-'; NotRun = '-'; Failed = '-'; Result = 'build failed' }
-            continue
-          }
-
-          # Unfiltered discovery count. The run below is filtered, so its TRX
-          # cannot tell "no tests here" from "all of them were excluded", and
-          # those two need opposite verdicts. `--list-tests` answers it for one
-          # extra invocation against an already-built project.
-          Write-Host "::group::dotnet test $name --list-tests"
-          $listOut = (dotnet test $proj -c Test --no-build --list-tests 2>&1 | Out-String)
-          $listExit = $LASTEXITCODE
-          Write-Host $listOut
-          Write-Host "::endgroup::"
-
-          # Three outcomes to separate, and the shape of the output is the only
-          # evidence available:
-          #
-          #   a real listing   marker, then one indented line per test
-          #   no test at all   marker, then an unindented "No test is available"
-          #   a broken host    marker, then an exception at column 0 and a trace
-          #
-          # The marker is printed in all three, so it cannot decide anything on
-          # its own. The listing is the contiguous indented block after it, and
-          # the diagnostics are judged only on the lines outside that block:
-          # a test display name may legitimately contain the word Exception
-          # (`LoadAssembliesShouldThrowException`, or a parameterised case
-          # rendered as `Throws(System.InvalidOperationException)`), so matching
-          # it anywhere in the output would read a healthy project as broken.
-          $lines  = $listOut -split "`r?`n"
-          $marker = [Array]::FindIndex([string[]]$lines, [Predicate[string]]{ param($l) $l -match 'The following Tests are available' })
-
-          $listing = @()
-          if ($marker -ge 0) {
-            for ($i = $marker + 1; $i -lt $lines.Count; $i++) {
-              if ($lines[$i] -notmatch '^\s+\S') { break }
-              $listing += $lines[$i]
-            }
-          }
-          $blockEnd = $marker + $listing.Count
-          $outside  = @(for ($i = 0; $i -lt $lines.Count; $i++) {
-            if ($marker -lt 0 -or $i -le $marker -or $i -gt $blockEnd) { $lines[$i] }
-          })
-
-          # VSTest states a zero-test assembly explicitly, unindented.
-          $zeroStated = @($lines | Where-Object { $_ -match '^No test is available in ' }).Count -gt 0
-          # Test-host failures surface as a TestPlatformException, a stack frame
-          # (`   at Namespace.Type.Method(`) or the diagnostic-logs hint, all of
-          # them outside the listing block.
-          $brokenHost = @($outside | Where-Object {
-            $_ -match 'TestPlatformException' -or
-            $_ -match '^\s*at [\w.`+<>]+\.[\w`+<>]+\(' -or
-            $_ -match 'Please check the diagnostic logs'
-          }).Count -gt 0
-
-          $discovered = $listing.Count
-          $listRead   = $false
-          if ($listExit -eq 0 -and -not $brokenHost) {
-            if ($discovered -gt 0)                        { $listRead = $true }
-            elseif ($zeroStated)                          { $listRead = $true }
-          }
-
-          if (-not $listRead) {
-            $undetermined += $name
-            $rows += [pscustomobject]@{ Project = $name; Discovered = '?'; Ran = '-'; Excluded = '-'; NotRun = '-'; Failed = '-'; Result = 'count unreadable' }
-            continue
-          }
-
-          if ($discovered -eq 0) {
-            $noTests += $name
-            $rows += [pscustomobject]@{ Project = $name; Discovered = 0; Ran = 0; Excluded = 0; NotRun = 0; Failed = 0; Result = 'no tests' }
-            continue
-          }
-
-          # The excluded tests never reach the results files, so vstest lists
-          # them by category, as written, beside the run's own output.
-          New-Item -ItemType Directory -Force -Path TestResults | Out-Null
-          foreach ($dll in [regex]::Matches($listOut, '(?m)^Test run for (.+?\.dll) \(')) {
-            dotnet vstest $dll.Groups[1].Value /ListFullyQualifiedTests `
-              "/ListTestsTargetPath:$(Join-Path $PWD "TestResults/$name.excluded.txt")" `
-              "/TestCaseFilter:TestCategory=$category" | Out-Null
-          }
-
-          Write-Host "::group::dotnet test $name --filter $filter"
-          dotnet test $proj -c Test --no-build --filter $filter `
-            --collect:"XPlat Code Coverage" `
-            --logger "trx;LogFileName=$name.trx" --logger "html;LogFileName=$name.html" `
-            --results-directory TestResults
-          $exit = $LASTEXITCODE
-          Write-Host "::endgroup::"
-
-          $trx = Join-Path "TestResults" "$name.trx"
-          if (-not (Test-Path $trx)) {
-            $noOutput += $name
-            $rows += [pscustomobject]@{ Project = $name; Discovered = $discovered; Ran = '-'; Excluded = '-'; NotRun = '-'; Failed = '-'; Result = 'no test output' }
-            continue
-          }
-
-          $counters = $null
-          try {
-            [xml]$trxXml = Get-Content $trx
-            $counters = $trxXml.TestRun.ResultSummary.Counters
-          } catch {
-            Write-Host "::debug::TRX for $name did not parse: $($_.Exception.Message)"
-          }
-          # A results file that parses but carries no counters proves nothing.
-          # Reading its absent attributes as zero would make it indistinguishable
-          # from "every test carried the category", which is a pass.
-          if (-not $counters -or $null -eq $counters.total) {
-            $badResults += $name
-            $rows += [pscustomobject]@{ Project = $name; Discovered = $discovered; Ran = '-'; Excluded = '-'; NotRun = '-'; Failed = '-'; Result = 'results unreadable' }
-            continue
-          }
-          $total    = [int]$counters.total
-          $executed = [int]$counters.executed
-          $failedN  = [int]$counters.failed
-          $excluded = $discovered - $total
-
-          # A negative figure means the listing and the run disagree on how many
-          # cases a parameterised test expands to, so neither the excluded count
-          # nor anything derived from it can be trusted for this project.
-          if ($excluded -lt 0) {
-            Write-Host "::warning title=UnitTests::${name}: the run matched $total tests but only $discovered were listed. The excluded count is not meaningful here, which usually means parameterised cases expand differently in the listing and the run."
-            $countMismatch += $name
-          }
-          # Tests the filter admitted and the run did not execute: inconclusive,
-          # ignored, or anything else the adapter declines to run. The `executed`
-          # counter is the signal; the dedicated `inconclusive` and `notExecuted`
-          # counters stay at 0 for NUnit, so the outcomes cannot be told apart
-          # from the summary and do not need to be.
-          $notRun      = $total - $executed
-          $notRunNames = @($trxXml.TestRun.Results.UnitTestResult |
-            Where-Object { $_.outcome -ne 'Passed' -and $_.outcome -ne 'Failed' } |
-            ForEach-Object { $_.testName })
-          $ranTotal += $executed
-
-          if ($exit -ne 0 -or $failedN -gt 0) {
-            $testFailed += $name
-            $result = 'failed'
-          } elseif ($total -eq 0) {
-            # Every test carried the category. Nothing ran, and that is the
-            # intended outcome rather than a defect.
-            $allExcluded += $name
-            $result = 'all excluded'
-          } elseif ($executed -eq 0) {
-            # Tests survived the filter and still none ran. A check that passes
-            # here reports green on a project that examined nothing.
-            $noneExecuted += [pscustomobject]@{ Name = $name; Discovered = $discovered; NotRun = $notRun }
-            $result = 'none executed'
-          } else {
-            $result = if ($notRun -gt 0) { 'passed, some not run' } else { 'passed' }
-          }
-
-          $rows += [pscustomobject]@{ Project = $name; Discovered = $discovered; Ran = $executed; Excluded = $excluded; NotRun = $notRun; Failed = $failedN; Result = $result }
-
-          if ($excluded -gt 0) {
-            Write-Host "::notice title=UnitTests::${name}: skipped: $excluded tests require external software"
-          }
-          if ($executed -gt 0 -and $notRun -gt 0) {
-            $partialNotRun += [pscustomobject]@{ Name = $name; NotRun = $notRun; Total = $total; Names = $notRunNames }
-            # GitHub truncates an annotation at roughly four thousand characters,
-            # and a parameterised fixture can produce hundreds of names. Cap the
-            # annotation and keep the full list in the job summary, which has no
-            # such limit.
-            $shown = @($notRunNames | Select-Object -First 20)
-            $tail  = if ($notRunNames.Count -gt $shown.Count) { " and $($notRunNames.Count - $shown.Count) more" } else { "" }
-            Write-Host "::warning title=UnitTests::${name}: $notRun of $total tests did not run: $($shown -join ', ')$tail"
-          }
-        }
-
-        # Per-project table, in the job summary and the log.
-        $table = $rows | Format-Table -AutoSize | Out-String
-        Write-Host $table
-        "### Unit tests"                                                          | Add-Content -Path $env:GITHUB_STEP_SUMMARY
-        ""                                                                        | Add-Content -Path $env:GITHUB_STEP_SUMMARY
-        "Filter: ``$filter``"                                                     | Add-Content -Path $env:GITHUB_STEP_SUMMARY
-        ""                                                                        | Add-Content -Path $env:GITHUB_STEP_SUMMARY
-        "| Project | Discovered | Ran | Excluded | Not run | Failed | Result |"     | Add-Content -Path $env:GITHUB_STEP_SUMMARY
-        "|---|---:|---:|---:|---:|---:|---|"                                      | Add-Content -Path $env:GITHUB_STEP_SUMMARY
-        foreach ($r in $rows) {
-          "| $($r.Project) | $($r.Discovered) | $($r.Ran) | $($r.Excluded) | $($r.NotRun) | $($r.Failed) | $($r.Result) |" |
-            Add-Content -Path $env:GITHUB_STEP_SUMMARY
-        }
-
-        if ($partialNotRun) {
-          $names = @(foreach ($p in $partialNotRun) { foreach ($t in $p.Names) { "- ``$($p.Name)``: $t" } })
-          @("", "<details><summary>Not run ($($names.Count))</summary>", "") + $names + @("", "</details>") |
-            Add-Content -Path $env:GITHUB_STEP_SUMMARY
-        }
-
-        foreach ($n in $allExcluded) {
-          Write-Host "::notice title=UnitTests::${n}: every test carries [Category(`"$category`")], so none ran. This is a pass."
-        }
-
-        # Only claim category exclusion when category exclusion is what happened.
-        # The earlier form fired on `ranTotal -eq 0` alone and so asserted it
-        # about a repository whose tests were all inconclusive instead.
-        $notJudged   = @('build failed', 'count unreadable', 'no test output', 'results unreadable')
-        $ranProjects = @($rows | Where-Object { $notJudged -notcontains $_.Result })
-        if ($ranTotal -eq 0 -and $ranProjects.Count -gt 0 -and $allExcluded.Count -eq $ranProjects.Count) {
-          Write-Host "::warning title=UnitTests::No test ran in this repository: every discovered test carries [Category(`"$category`")]."
-        }
-
-        # A test project with no test is a defect in the project, not a pass.
-        # The previous guard compared .trx file counts, which never caught this:
-        # `dotnet test` writes a results file with total=0 and exits 0 whether
-        # the project is empty or the filter matched nothing. Counters tell the
-        # two apart; file presence does not.
-        if ($buildFailed)  { Write-Host "::error title=UnitTests::Build failed for project(s): $($buildFailed -join ', ')" }
-        foreach ($n in $undetermined) {
-          Write-Host "::error title=UnitTests::could not determine test count for $n . ``dotnet test --list-tests`` neither listed a test nor reported that none was available, so the project cannot be judged. This is a fault in the check or in the project's test host, not evidence about its tests."
-        }
-        if ($noTests)      { Write-Host "::error title=UnitTests::No test found in project(s): $($noTests -join ', ') . The project compiled but declares no test. Remove the project or add tests." }
-        foreach ($p in $noneExecuted) {
-          Write-Host "::error title=UnitTests::no tests executed in $($p.Name) ($($p.Discovered) discovered, $($p.NotRun) not run). The filter admitted these tests and none of them ran, so this project examined nothing. Tag them [Category(`"$category`")] if they need software a runner cannot have, otherwise fix what is stopping them."
-        }
-        if ($noOutput)     { Write-Host "::error title=UnitTests::No test output from project(s): $($noOutput -join ', ') . The run produced no .trx, which indicates a runner load failure." }
-        if ($badResults)   { Write-Host "::error title=UnitTests::Test results could not be read for project(s): $($badResults -join ', ') . The .trx exists but carries no ResultSummary/Counters, so the run cannot be judged." }
-        if ($testFailed)   { Write-Host "::error title=UnitTests::Test runs failed for project(s): $($testFailed -join ', ')" }
-        if ($buildFailed -or $undetermined -or $noTests -or $noneExecuted -or $noOutput -or $badResults -or $testFailed) { exit 1 }
+        $exitCode = Invoke-UnitTestProjects `
+          -Projects    @(Get-Content $env:PROJECT_LIST | Where-Object { $_ }) `
+          -Category    $env:EXTERNAL_CATEGORY `
+          -SummaryPath $env:GITHUB_STEP_SUMMARY
+        exit $exitCode
 
     # Every step from here to the end is reporting only. Each is
     # continue-on-error, so none can change the check's outcome, which the
