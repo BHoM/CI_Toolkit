@@ -7,14 +7,15 @@ using System.Diagnostics;
 /// Selection happens twice, in two languages, in two repositories' worth of convention:
 ///   1. compute-changed-files runs `git diff --name-only --diff-filter=ACMRT HEAD^1 HEAD --
 ///      &lt;pathspec&gt;` with the pathspec taken from the calling template, e.g.
-///      `patterns: '*AssemblyInfo.cs *.csproj'` for a project-compliance job.
+///      `patterns: '*AssemblyInfo.cs *.csproj :(exclude,icase).ci/* :(exclude,icase)*/.ci/*'`
+///      for a project-compliance job.
 ///   2. ComplianceRunner then asks FileFilter.IsRelevantFile of every file it was handed.
 ///
 /// Each half has tests. `.github/scripts/tests/test-changed-file-patterns.sh` asserts the
 /// pathspec behaviour against real git, and FileFilterTests, which lives in the sibling
 /// Compliance.Unit.Tests project, asserts the predicate. Neither
 /// asserts that the two agree, and they do not: the pathspec token `*AssemblyInfo.cs` selects
-/// any file whose name ENDS with that string, while FileFilter.cs:24 requires the name to
+/// any file whose name ENDS with that string, while FileFilter's AssemblyInfo name test requires the name to
 /// EQUAL it. A file in between is selected, counted into the skip decision, handed to the
 /// runner, and then silently discarded.
 ///
@@ -57,7 +58,7 @@ public class PathspecFilterPairingTests
             // instead, since then git would not select the file in the first place and the
             // assertion above is the one that changes.
             Assert.That(acceptedByFilter, Is.False,
-                "FileFilter.cs:24 requires Path.GetFileName(file).Equals(\"AssemblyInfo.cs\"), "
+                "FileFilter's AssemblyInfo name test requires Path.GetFileName(file).Equals(\"AssemblyInfo.cs\"), "
               + "so the file is discarded with no message.");
 
             // The pairing, stated as the thing that is actually wrong.
@@ -79,6 +80,28 @@ public class PathspecFilterPairingTests
         {
             Assert.That(GitDiffSelects(ProjectPathspec, exact), Is.True);
             Assert.That(FileFilter.IsRelevantFile(exact, "project"), Is.True);
+        });
+    }
+
+    // The pathspecs shipped by the tier templates for each check.
+    private const string CiExclusion        = ":(exclude,icase).ci/* :(exclude,icase)*/.ci/*";
+    private const string SourcePathspec     = "*.cs " + CiExclusion;
+    private const string CopyrightPathspec  = "*.cs";
+    private const string ProjectCiPathspec  = "*AssemblyInfo.cs *.csproj " + CiExclusion;
+
+    [Test]
+    [Description("Under .ci/ the two halves agree: out for code, documentation and project, in for copyright.")]
+    [TestCase("code",          SourcePathspec,    ".ci/unit-tests/Foo_Tests/Query/Bar.cs",         false)]
+    [TestCase("documentation", SourcePathspec,    ".ci/unit-tests/Foo_Tests/Query/Bar.cs",         false)]
+    [TestCase("project",       ProjectCiPathspec, ".ci/unit-tests/Foo/Properties/AssemblyInfo.cs", false)]
+    [TestCase("project",       ProjectCiPathspec, ".ci/code/TestRunner/TestRunner.csproj",         false)]
+    [TestCase("copyright",     CopyrightPathspec, ".ci/unit-tests/Foo_Tests/Query/Bar.cs",         true)]
+    public void PathspecAndFilter_AgreeOnCiFiles(string checkType, string pathspec, string file, bool expected)
+    {
+        Assert.Multiple(() =>
+        {
+            Assert.That(GitDiffSelects(pathspec, file), Is.EqualTo(expected), "pathspec");
+            Assert.That(FileFilter.IsRelevantFile(file, checkType), Is.EqualTo(expected), "FileFilter");
         });
     }
 
@@ -105,8 +128,11 @@ public class PathspecFilterPairingTests
             Git(repo, "add", "-A");
             Git(repo, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "change");
 
-            string selected = Git(repo, "diff", "--name-only", "--diff-filter=ACMRT",
-                                        "HEAD^1", "HEAD", "--", pathspec);
+            // Split on whitespace, as compute-changed-files does with `read -ra`.
+            string[] diffArgs = new[] { "diff", "--name-only", "--diff-filter=ACMRT", "HEAD^1", "HEAD", "--" }
+                .Concat(pathspec.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+                .ToArray();
+            string selected = Git(repo, diffArgs);
 
             return selected
                 .Split('\n', StringSplitOptions.RemoveEmptyEntries)

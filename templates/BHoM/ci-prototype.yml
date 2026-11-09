@@ -51,6 +51,6 @@ jobs:
         uses: BHoM/CI_Toolkit/.github/actions/ci-compliance@develop
         with:
           check_type: project
-          patterns: '*AssemblyInfo.cs *.csproj'
+          patterns: '*AssemblyInfo.cs *.csproj :(exclude,icase).ci/* :(exclude,icase)*/.ci/*'
           app_id: ${{ secrets.BHOM_APP_ID }}
           private_key: ${{ secrets.BHOM_APP_PRIVATE_KEY }}
