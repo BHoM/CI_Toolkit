@@ -76,6 +76,16 @@ FIXTURE_PATHS=(
   "Proj/Properties/AssemblyInfo.cs"      # nested project, was missed
   "Proj/Proj.csproj"                     # already matched
   "Engine/AssemblyInfoHelper.cs"         # NEGATIVE for the exclusions: real source, name only contains AssemblyInfo
+  # .ci/ layouts. Test and build tooling: out of scope for code, documentation and
+  # project compliance, still in scope for copyright. Dataset fixtures are above.
+  ".ci/unit-tests/Foo_Tests/Query/Bar.cs"           # root .ci, the unit-test layout
+  "src/.ci/Nested.cs"                               # nested .ci
+  ".CI/Upper.cs"                                    # segment casing
+  ".ci/unit-tests/Foo/Properties/AssemblyInfo.cs"   # AssemblyInfo under .ci
+  ".ci/code/TestRunner/TestRunner.csproj"           # .ci project not named *.Tests
+  "Proj/.ci/Datasets/nested.json"                   # nested .ci dataset fixture
+  "My.ci/Thing.cs"                                  # NEGATIVE: segment only contains .ci
+  ".cix/Thing.cs"                                   # NEGATIVE: segment only starts with .ci
   # Source / misc.
   "Engine/Query/Thing.cs"
   "Engine/Compute/Thing.sln"
@@ -269,6 +279,9 @@ else
     # Defect A2, casing.
     assert_matches     "dataset" "$pat" ".ci/DataSets/Area/capsdeep.json"
     assert_matches     "dataset" "$pat" "DataSets/Caps/caps.json"
+    # .ci fixtures stay in scope here, nested as well as at the root. The runner
+    # checks them and downgrades only the Confidence rule.
+    assert_matches     "dataset" "$pat" "Proj/.ci/Datasets/nested.json"
     assert_matches     "dataset" "$pat" "DATASETS/shouty/shout.json"
     # Must stay narrower than '*.json'.
     assert_not_matches "dataset" "$pat" "Other/config.json"
@@ -348,7 +361,46 @@ else
     assert_matches     "project" "$pat" "AssemblyInfo.cs"
     assert_matches     "project" "$pat" "Proj/Proj.csproj"
     assert_not_matches "project" "$pat" "Engine/Query/Thing.cs"
+    # .ci/ is test and build tooling, not shipped, so project conventions do not apply.
+    assert_not_matches "project" "$pat" ".ci/unit-tests/Foo/Properties/AssemblyInfo.cs"
+    assert_not_matches "project" "$pat" ".ci/code/TestRunner/TestRunner.csproj"
   done <<< "$project_patterns"
+fi
+
+# code and documentation share a selector: every .cs file outside .ci/.
+for check in code documentation; do
+  echo "$check patterns (as shipped in the tier templates)"
+  cs_patterns=$(extract_check_patterns "$check")
+  if [ -z "$cs_patterns" ]; then
+    fail "$check: no 'patterns:' found for check_type $check"
+    continue
+  fi
+  while IFS= read -r pat; do
+    assert_matches     "$check" "$pat" "Engine/Query/Thing.cs"
+    assert_matches     "$check" "$pat" "Engine/AssemblyInfoHelper.cs"
+    assert_not_matches "$check" "$pat" ".ci/unit-tests/Foo_Tests/Query/Bar.cs"
+    assert_not_matches "$check" "$pat" "src/.ci/Nested.cs"
+    assert_not_matches "$check" "$pat" ".CI/Upper.cs"
+    assert_not_matches "$check" "$pat" ".ci/unit-tests/Foo/Properties/AssemblyInfo.cs"
+    # Whole segment only: a directory whose name merely contains .ci is source.
+    assert_matches     "$check" "$pat" "My.ci/Thing.cs"
+    assert_matches     "$check" "$pat" ".cix/Thing.cs"
+  done <<< "$cs_patterns"
+done
+
+# copyright keeps .ci/ in scope: the files are public source and need a header.
+echo "copyright patterns (as shipped in the tier templates)"
+copyright_patterns=$(extract_check_patterns copyright)
+if [ -z "$copyright_patterns" ]; then
+  fail "copyright: no 'patterns:' found for check_type copyright"
+else
+  while IFS= read -r pat; do
+    assert_matches     "copyright" "$pat" "Engine/Query/Thing.cs"
+    assert_matches     "copyright" "$pat" ".ci/unit-tests/Foo_Tests/Query/Bar.cs"
+    assert_matches     "copyright" "$pat" "src/.ci/Nested.cs"
+    assert_matches     "copyright" "$pat" ".CI/Upper.cs"
+    assert_not_matches "copyright" "$pat" "Proj/Proj.csproj"
+  done <<< "$copyright_patterns"
 fi
 
 echo "serialisation pattern (excludes AssemblyInfo.cs, keeps real source)"
