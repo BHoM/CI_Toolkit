@@ -113,6 +113,10 @@ public static class FileFilter
     /// Not root-anchored, so a nested SomeProject/.ci counts. That directory is a .ci directory
     /// wherever it sits, and the answer must not change because a caller passed an absolute path
     /// rather than a repository-relative one.
+    ///
+    /// The flip side: an absolute path through any ancestor directory named .ci is excluded too,
+    /// even one above the repository root. That is safe in CI, where the runners are handed the
+    /// repository-relative paths git diff prints.
     /// </remarks>
     public static bool IsUnderCiDirectory(string file)
     {
