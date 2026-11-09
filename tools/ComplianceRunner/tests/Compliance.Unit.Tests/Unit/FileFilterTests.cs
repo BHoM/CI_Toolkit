@@ -22,6 +22,30 @@ public class FileFilterTests
         [TestCase("project",       ".ci/unit-tests/Foo.Tests.csproj",           ExpectedResult = false)] // under .ci/ — excluded
         [TestCase("project",       "src/Foo.Tests.csproj",                      ExpectedResult = false)] // *.Tests.csproj — excluded
         [TestCase("project",       @".ci\unit-tests\Bar.Tests.csproj",          ExpectedResult = false)] // backslash path, .ci/ excluded
+
+        // .ci/ is out of scope for code, documentation and project, and stays in scope for
+        // copyright, which every public source file needs.
+        [TestCase("code",          ".ci/unit-tests/Foo_Tests/Query/Bar.cs",     ExpectedResult = false)]
+        [TestCase("documentation", ".ci/unit-tests/Foo_Tests/Query/Bar.cs",     ExpectedResult = false)]
+        [TestCase("copyright",     ".ci/unit-tests/Foo_Tests/Query/Bar.cs",     ExpectedResult = true)]
+        [TestCase("code",          @".ci\unit-tests\Foo_Tests\Query\Bar.cs",    ExpectedResult = false)] // backslash path
+        [TestCase("documentation", @".ci\unit-tests\Foo_Tests\Query\Bar.cs",    ExpectedResult = false)]
+        [TestCase("copyright",     @".ci\unit-tests\Foo_Tests\Query\Bar.cs",    ExpectedResult = true)]
+        [TestCase("code",          "src/.ci/Bar.cs",                            ExpectedResult = false)] // nested .ci
+        [TestCase("documentation", "src/.ci/Bar.cs",                            ExpectedResult = false)]
+        [TestCase("copyright",     "src/.ci/Bar.cs",                            ExpectedResult = true)]
+        [TestCase("code",          ".CI/Bar.cs",                                ExpectedResult = false)] // segment case-insensitive
+        [TestCase("project",       ".ci/unit-tests/Foo/Properties/AssemblyInfo.cs", ExpectedResult = false)]
+        [TestCase("project",       ".ci/code/TestRunner/TestRunner.csproj",     ExpectedResult = false)] // not named *.Tests
+        [TestCase("project",       "src/.ci/TestRunner.csproj",                 ExpectedResult = false)]
+
+        // Whole segment only: a directory whose name merely contains .ci is ordinary source.
+        [TestCase("code",          "My.ci/Bar.cs",                              ExpectedResult = true)]
+        [TestCase("documentation", "My.ci/Bar.cs",                              ExpectedResult = true)]
+        [TestCase("code",          ".cix/Bar.cs",                               ExpectedResult = true)]
+        [TestCase("documentation", ".cix/Bar.cs",                               ExpectedResult = true)]
+        [TestCase("project",       "My.ci/Properties/AssemblyInfo.cs",          ExpectedResult = true)]
+        [TestCase("project",       ".cix/Foo.csproj",                           ExpectedResult = true)]
         public bool IsRelevantFile(string checkType, string file)
             => FileFilter.IsRelevantFile(file, checkType);
     }

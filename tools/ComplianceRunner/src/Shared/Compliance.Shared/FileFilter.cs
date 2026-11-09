@@ -4,22 +4,17 @@ public static class FileFilter
     /// <summary>Returns true when a file should be processed by the given compliance check type.</summary>
     public static bool IsRelevantFile(string file, string checkType)
     {
+        // .ci/ holds test and build tooling, which is neither shipped nor installed, so the code,
+        // documentation and project conventions do not apply to it. Copyright still does: the
+        // files are public source and need a licence header like any other.
+        if ((checkType == "code" || checkType == "documentation" || checkType == "project")
+            && IsUnderCiDirectory(file))
+            return false;
+
         if (checkType == "project")
         {
-            var normalized = file.Replace("\\", "/");
-
             if (file.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
-            {
-                // Exclude test projects and anything under a .ci/ directory.
-                // These are internal tooling and are not subject to BHoM shipping conventions
-                // (target framework, PostBuildEvent, AssemblyVersion, etc.).
-                if (normalized.Contains("/.ci/", StringComparison.OrdinalIgnoreCase) ||
-                    normalized.StartsWith(".ci/", StringComparison.OrdinalIgnoreCase))
-                    return false;
-                if (Path.GetFileName(file).EndsWith(".Tests.csproj", StringComparison.OrdinalIgnoreCase))
-                    return false;
-                return true;
-            }
+                return !Path.GetFileName(file).EndsWith(".Tests.csproj", StringComparison.OrdinalIgnoreCase);
 
             return Path.GetFileName(file).Equals("AssemblyInfo.cs", StringComparison.OrdinalIgnoreCase);
         }
@@ -98,6 +93,19 @@ public static class FileFilter
     /// The engine has no concept of that difference and should not: it is a convention about
     /// where CI puts things, so it is decided here rather than in the compliance rule.
     ///
+    /// Any .ci descendant rather than .ci/Datasets specifically, which is the broader of the two
+    /// readings and matches what IsRelevantFile does for the code, documentation and project
+    /// checks. The narrower one left a gap: the repository convention puts test projects under
+    /// .ci/unit-tests/, and a fixture under one of those would have been examined and not
+    /// demoted. Both spellings give the same answer on the fleet as it stands, so this closes a
+    /// class rather than changing an outcome.
+    /// </remarks>
+    public static bool IsUnitTestFixture(string file) => IsUnderCiDirectory(file);
+
+    /// <summary>
+    /// True when one of the file's parent directories is called ".ci", case-insensitive.
+    /// </summary>
+    /// <remarks>
     /// Anchored on a whole segment, not on a substring. A substring test matches a directory
     /// named My.ci or .cix, which is the same fault <c>IsUnderDatasetsDirectory</c> above was
     /// changed to avoid.
@@ -105,15 +113,8 @@ public static class FileFilter
     /// Not root-anchored, so a nested SomeProject/.ci counts. That directory is a .ci directory
     /// wherever it sits, and the answer must not change because a caller passed an absolute path
     /// rather than a repository-relative one.
-    ///
-    /// Any .ci descendant rather than .ci/Datasets specifically, which is the broader of the two
-    /// readings and matches what IsRelevantFile already does for the project check. The narrower
-    /// one left a gap: the repository convention puts test projects under .ci/unit-tests/, and a
-    /// fixture under one of those would have been examined and not demoted. Both spellings give
-    /// the same answer on the fleet as it stands, so this closes a class rather than changing an
-    /// outcome.
     /// </remarks>
-    public static bool IsUnitTestFixture(string file)
+    public static bool IsUnderCiDirectory(string file)
     {
         var normalized = file.Replace("\\", "/");
 
