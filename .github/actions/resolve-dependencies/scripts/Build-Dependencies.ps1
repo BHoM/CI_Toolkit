@@ -8,6 +8,7 @@ $ErrorActionPreference = 'Stop'
 
 # .github/actions/resolve-dependencies/scripts -> ../../../scripts is .github/scripts.
 . (Join-Path $PSScriptRoot '../../../scripts/Select-AltConfigs.ps1')
+. (Join-Path $PSScriptRoot '../../../scripts/Invoke-DotnetRestore.ps1')
 
 # Uses dotnet build for SDK-style repos. Hard-fails on non-SDK (legacy MSBuild) repos.
 function Invoke-BHoMBuild {
@@ -46,8 +47,7 @@ function Invoke-BHoMBuild {
     # Push into the repo directory for consistent relative path resolution.
     Push-Location $targetDir
     try {
-        dotnet restore $Target
-        if ($LASTEXITCODE -ne 0) { throw "dotnet restore failed for $Target" }
+        Invoke-DotnetRestoreWithRetry -Target $Target
 
         # -clp:ErrorsOnly suppresses WARNING output from the console logger for
         # dependency builds only. Not a cosmetic change: actions/setup-dotnet

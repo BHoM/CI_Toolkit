@@ -1,0 +1,100 @@
+# Invoke-DotnetRestore.Tests.ps1: which restore failures are retried.
+#
+# The property: a dropped connection to the feed is retried, and anything else fails on the
+# first attempt. The transient lines are taken from a real ci-build failure; the genuine ones are
+# real restore errors from the same fleet.
+#
+# Run locally:  pwsh -Command "Invoke-Pester .github/scripts/tests -Output Detailed"
+# Run in CI:    lint-workflows.yml, the powershell-tests job.
+
+BeforeAll {
+    . (Join-Path $PSScriptRoot '../Invoke-DotnetRestore.ps1')
+
+    $script:sdk = 'C:\Program Files\dotnet\sdk\8.0.427'
+    $script:sln = '[C:\bhom-deps\BHoM_Engine\BHoM_Engine.sln]'
+}
+
+Describe 'Test-TransientRestoreFailure' {
+
+    Context 'retried' {
+
+        It 'a nupkg download cut off by the remote host' {
+            $output = @(
+                "  Restored C:\bhom-deps\BHoM_Engine\Spatial_Engine\Spatial_Engine.csproj (in 9 ms)."
+                "  An error occurred while sending the request."
+                "$sdk\NuGet.targets(174,5): error : Failed to download package 'Microsoft.CSharp.4.5.0' from 'https://api.nuget.org/v3-flatcontainer/microsoft.csharp/4.5.0/microsoft.csharp.4.5.0.nupkg'. $sln"
+                "$sdk\NuGet.targets(174,5): error : An error occurred while sending the request. $sln"
+                "$sdk\NuGet.targets(174,5): error :   Unable to read data from the transport connection: An existing connection was forcibly closed by the remote host.. $sln"
+                "$sdk\NuGet.targets(174,5): error : The feed 'nuget.org [https://api.nuget.org/v3/index.json]' lists package 'Microsoft.CSharp.4.5.0' but multiple attempts to download the nupkg have failed. $sln"
+                "  Failed to restore C:\bhom-deps\BHoM_Engine\Security_Engine\Security_Engine.csproj (in 16.94 sec)."
+            )
+            Test-TransientRestoreFailure -Output $output | Should -BeTrue
+        }
+
+        It 'a transport error in output that contains a blank line' {
+            $output = @("C:\x\x.csproj : error NU1301: Unable to load the service index for source https://api.nuget.org/v3/index.json.", '')
+            Test-TransientRestoreFailure -Output $output | Should -BeTrue
+        }
+
+        It 'the service index unreachable' {
+            $output = @("C:\x\x.csproj : error NU1301: Unable to load the service index for source https://api.nuget.org/v3/index.json.")
+            Test-TransientRestoreFailure -Output $output | Should -BeTrue
+        }
+
+        It 'a 503 from the feed' {
+            $output = @("$sdk\NuGet.targets(174,5): error : Response status code does not indicate success: 503 (Service Unavailable). $sln")
+            Test-TransientRestoreFailure -Output $output | Should -BeTrue
+        }
+    }
+
+    Context 'not retried' {
+
+        It 'a package reference with no version' {
+            $output = @("D:\a\R\R\P\P.csproj : error NU1015: The following PackageReference item(s) do not have a version specified: System.IO.Compression [D:\a\R\R\R.sln]")
+            Test-TransientRestoreFailure -Output $output | Should -BeFalse
+        }
+
+        It 'a target framework the SDK cannot build' {
+            $output = @("$sdk\Sdks\Microsoft.NET.Sdk\targets\Microsoft.NET.TargetFrameworkInference.targets(166,5): error NETSDK1045: The current .NET SDK does not support targeting .NET 10.0. $sln")
+            Test-TransientRestoreFailure -Output $output | Should -BeFalse
+        }
+
+        It 'a package that does not exist' {
+            $output = @("C:\x\x.csproj : error NU1101: Unable to find package Not.A.Package. No packages exist with this id in source(s): nuget.org")
+            Test-TransientRestoreFailure -Output $output | Should -BeFalse
+        }
+
+        It 'a genuine error alongside a transport error' {
+            $output = @(
+                "$sdk\NuGet.targets(174,5): error : An error occurred while sending the request. $sln"
+                "C:\x\x.csproj : error NU1101: Unable to find package Not.A.Package. No packages exist with this id in source(s): nuget.org"
+            )
+            Test-TransientRestoreFailure -Output $output | Should -BeFalse
+        }
+
+        # NU1301 covers any feed NuGet cannot use. The shape is the one a GitHub-hosted runner
+        # printed for a 503; the reasons are the ones a restore gives for a feed that is wrong.
+        It 'a feed answering <Status>' -TestCases @(
+            @{ Status = '404 (Not Found)' }
+            @{ Status = '401 (Unauthorized)' }
+            @{ Status = '403 (Forbidden)' }
+        ) {
+            param($Status)
+            $output = @(
+                "C:\x\x.csproj : error NU1301: Unable to load the service index for source https://api.nuget.org/v3/no-such-index.json. [C:\x\x.sln]"
+                "C:\x\x.csproj : error NU1301:   Response status code does not indicate success: $Status. [C:\x\x.sln]"
+            )
+            Test-TransientRestoreFailure -Output $output | Should -BeFalse
+        }
+
+        It 'a local source that does not exist' {
+            $output = @("C:\x\x.csproj : error NU1301: The local source 'C:\no\such\feed' doesn't exist. [C:\x\x.sln]")
+            Test-TransientRestoreFailure -Output $output | Should -BeFalse
+        }
+
+        It 'a non-zero exit with no error line at all' {
+            $output = @("  Determining projects to restore...", "  An error occurred while sending the request.")
+            Test-TransientRestoreFailure -Output $output | Should -BeFalse
+        }
+    }
+}
