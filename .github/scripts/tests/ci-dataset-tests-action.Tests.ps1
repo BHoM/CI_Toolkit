@@ -52,6 +52,34 @@ Describe 'ci-dataset-tests action.yml' {
         }
     }
 
+    # Temporary, pending BHoM/Test_Toolkit#556. A paused run reports success, so the warning
+    # is the only thing separating it from a real pass. Remove this context with the pause.
+    Context 'a paused run says so' {
+
+        It 'is paused unless a caller passes false' {
+            $block = ($datasetTests -split '(?m)^  paused:')[-1]
+            $block = ($block -split '(?m)^runs:')[0]
+            $block | Should -Match "default: 'true'"
+        }
+
+        It 'warns, and writes the pause to the step summary' {
+            $block = ($datasetTests -split 'name: Report pause')[-1]
+            $block = ($block -split '- name: ')[0]
+            $block | Should -Match "if: inputs\.paused != 'false'"
+            $block | Should -Match '::warning title=DatasetTests::'
+            $block | Should -Match 'GITHUB_STEP_SUMMARY'
+            $block | Should -Not -Match '::error'
+        }
+
+        It 'sets count to zero before reading any changed-file count' {
+            $block = ($datasetTests -split 'name: Resolve test scope')[-1]
+            $pauseIdx = $block.IndexOf("'`${{ inputs.paused }}' -ne 'false'")
+            $readIdx  = $block.IndexOf('steps.changed-cs.outputs.count')
+            $pauseIdx | Should -BeGreaterThan 0
+            $pauseIdx | Should -BeLessThan $readIdx
+        }
+    }
+
     Context 'it matches the action that already got this right' {
 
         # Both actions read the same file, the same way, for the same reason. If one is
