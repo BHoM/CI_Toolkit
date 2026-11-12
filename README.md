@@ -28,7 +28,7 @@ calls the composite actions directly, and each check is an independent job.
 |---|---|
 | `ci-build` | Builds the repository and its dependency graph in Release |
 | `ci-compliance` | Five rule sets over source and datasets. Pick one with `check_type: code \| copyright \| documentation \| project \| dataset` |
-| `ci-dataset-tests` | Runs the fixtures in the repository's `.ci/Datasets/` directory |
+| `ci-dataset-tests` | Runs the fixtures in the repository's `.ci/Datasets/` directory. **Paused**, see below |
 | `ci-serialisation` | Round-trips objects through the BHoM serialiser and reports failures the branch introduced |
 | `ci-versioning` | Deserialises historical data against the current assemblies to catch breaking type changes |
 | `ci-unit-tests` | Runs the test solution under `.ci/unit-tests/` |
@@ -37,6 +37,13 @@ calls the composite actions directly, and each check is an independent job.
 Two of those look alike and are not. `ci-dataset-tests` executes the fixtures in
 `.ci/Datasets/`. `ci-compliance` with `check_type: dataset` runs nothing: it checks that
 changed dataset JSON deserialises and carries its source and author metadata.
+
+`ci-dataset-tests` is paused until BHoM/Test_Toolkit#556 is fixed: fixtures written under
+.NET Framework do not always compare equal under the runtime this check uses. While paused it
+runs nothing and reports success with a warning, so a green result says nothing about the
+fixtures, and it should not be made a required check. To run the tests anyway, for example
+to verify that fix on a branch, pass `paused: 'false'` to the action in that branch's workflow.
+The match is case-insensitive, and any other value, or none, leaves it paused.
 
 Six further actions in the same directory are shared plumbing rather than checks:
 `resolve-dependencies`, `prepare-runner`, `compute-changed-files`, `discover-solution`,

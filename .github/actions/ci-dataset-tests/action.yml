@@ -44,11 +44,34 @@ inputs:
       .NET SDK version for publishing DatasetTestRunner.
     required: false
     default: '10.x'
+  paused:
+    description: >
+      Temporarily paused pending BHoM/Test_Toolkit#556: fixtures written under .NET
+      Framework do not always compare equal under the runtime this check uses. While
+      paused the job runs nothing and reports success with a warning. Pass 'false' to
+      run the tests anyway, for example to verify that fix on a branch. The match is
+      case-insensitive, and any other value, or none, leaves the job paused.
+    required: false
+    default: 'true'
 
 runs:
   using: composite
   steps:
+    # Green, not skipped: a composite action cannot skip the job that calls it. The warning
+    # and summary line are what separate this from a real pass, so keep them while paused.
+    - name: Report pause
+      if: inputs.paused != 'false'
+      shell: pwsh
+      run: |
+        $msg = "Dataset tests are paused pending BHoM/Test_Toolkit#556. Nothing was run, so this result says nothing about the fixtures."
+        Write-Host "::warning title=DatasetTests::$msg"
+        if ($env:GITHUB_STEP_SUMMARY) {
+          @("### Dataset unit tests paused", "", $msg) |
+            Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+        }
+
     - name: Checkout caller repo
+      if: inputs.paused == 'false'
       uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       with:
         fetch-depth: 1
@@ -57,6 +80,7 @@ runs:
     # run all dataset fixtures. A dataset-only change runs just the touched
     # fixtures.
     - name: Compute changed source files
+      if: inputs.paused == 'false'
       id: changed-cs
       uses: BHoM/CI_Toolkit/.github/actions/compute-changed-files@develop
       with:
@@ -74,6 +98,7 @@ runs:
     # pattern was reused here where the intent differs.
     # '*' matches '/' in git pathspecs, so a single '*' spans nested directories.
     - name: Compute changed dataset files
+      if: inputs.paused == 'false'
       id: changed-datasets
       uses: BHoM/CI_Toolkit/.github/actions/compute-changed-files@develop
       with:
@@ -89,6 +114,11 @@ runs:
       id: scope
       shell: pwsh
       run: |
+        if ('${{ inputs.paused }}' -ne 'false') {
+          "count=0" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          return
+        }
+
         $csCount      = [int]"${{ steps.changed-cs.outputs.count }}"
         $datasetCount = [int]"${{ steps.changed-datasets.outputs.count }}"
 
