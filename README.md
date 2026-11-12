@@ -43,6 +43,7 @@ changed dataset JSON deserialises and carries its source and author metadata.
 runs nothing and reports success with a warning, so a green result says nothing about the
 fixtures, and it should not be made a required check. To run the tests anyway, for example
 to verify that fix on a branch, pass `paused: 'false'` to the action in that branch's workflow.
+The match is case-insensitive, and any other value, or none, leaves it paused.
 
 Six further actions in the same directory are shared plumbing rather than checks:
 `resolve-dependencies`, `prepare-runner`, `compute-changed-files`, `discover-solution`,

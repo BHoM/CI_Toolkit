@@ -71,6 +71,14 @@ Describe 'ci-dataset-tests action.yml' {
             $block | Should -Not -Match '::error'
         }
 
+        It 'skips checkout and change detection while paused' {
+            foreach ($step in 'Checkout caller repo', 'Compute changed source files', 'Compute changed dataset files') {
+                $block = ($datasetTests -split "name: $step")[-1]
+                $block = ($block -split '- name: ')[0]
+                $block | Should -Match "if: inputs\.paused == 'false'" -Because "$step should not run while paused"
+            }
+        }
+
         It 'sets count to zero before reading any changed-file count' {
             $block = ($datasetTests -split 'name: Resolve test scope')[-1]
             $pauseIdx = $block.IndexOf("'`${{ inputs.paused }}' -ne 'false'")

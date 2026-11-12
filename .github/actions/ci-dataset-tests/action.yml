@@ -49,7 +49,8 @@ inputs:
       Temporarily paused pending BHoM/Test_Toolkit#556: fixtures written under .NET
       Framework do not always compare equal under the runtime this check uses. While
       paused the job runs nothing and reports success with a warning. Pass 'false' to
-      run the tests anyway, for example to verify that fix on a branch.
+      run the tests anyway, for example to verify that fix on a branch. The match is
+      case-insensitive, and any other value, or none, leaves the job paused.
     required: false
     default: 'true'
 
