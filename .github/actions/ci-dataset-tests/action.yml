@@ -38,7 +38,7 @@ inputs:
     description: >
       .NET SDK version for building the caller's dep graph.
     required: false
-    default: '8.0'
+    default: '10.0'
   runner_dotnet_version:
     description: >
       .NET SDK version for publishing DatasetTestRunner.

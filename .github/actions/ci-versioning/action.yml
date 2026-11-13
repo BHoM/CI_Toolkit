@@ -72,7 +72,7 @@ inputs:
       runner publish (prepare-runner). The runner binary and the assemblies it
       reflects over must be built with the same toolchain.
     required: false
-    default: '8.0'
+    default: '10.0'
 
 runs:
   using: composite

@@ -14,11 +14,11 @@ inputs:
 
   dotnet_version:
     description: >
-      .NET SDK version to build dependencies with (e.g. '8.0'). Pinned via
+      .NET SDK version to build dependencies with (e.g. '10.0'). Pinned via
       a generated global.json at the clone root, so dep builds use this
       version regardless of other SDKs present on the runner.
     required: false
-    default: "8.0"
+    default: "10.0"
 
   configuration:
     description: Build configuration (Release/Debug).
@@ -86,8 +86,7 @@ runs:
         path: |
           ~/.nuget/packages
           ~\AppData\Local\Microsoft\MSBuild\Cache
-        # dotnet_version is intentionally not part of the key: NuGet
-        # binaries are SDK-version-agnostic for net8.0 targets.
+        # dotnet_version is intentionally not part of the NuGet package cache key.
         key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj','**/nuget.config') }}
         restore-keys: ${{ runner.os }}-nuget-
 

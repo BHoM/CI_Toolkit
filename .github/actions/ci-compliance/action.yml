@@ -17,9 +17,9 @@ inputs:
     required: false
     default: 'BHoM/Test_Toolkit'
   deps_dotnet_version:
-    description: .NET SDK version that builds the Test_Toolkit dep graph (net8.0).
+    description: .NET SDK version that builds the Test_Toolkit dependency graph.
     required: false
-    default: '8.0'
+    default: '10.0'
   runner_dotnet_version:
     description: .NET SDK version that publishes the compliance runner (net10.0).
     required: false
