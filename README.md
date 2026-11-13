@@ -89,6 +89,12 @@ The optional ones skip with a notice when absent, so a repository with no datase
 run the beta template. The solution file is the exception: `ci-build` reports an error and
 fails if it cannot find one, and it rejects legacy non-SDK project files.
 
+Dependency builds use the .NET 10 SDK by default. This selects a build tool, not a
+project's target framework. `ci-build`, `ci-compliance`, `ci-dataset-tests` and
+`ci-unit-tests` accept `deps_dotnet_version`; `ci-serialisation` and `ci-versioning`
+accept `dotnet_version`. A dependency's own `global.json` can select a different SDK.
+The assembly cache includes the selected SDK version, so changing it requires a cold build.
+
 ### Credentials
 
 Checks work with no configuration on public repositories, using the token GitHub Actions

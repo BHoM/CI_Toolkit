@@ -99,14 +99,13 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       # Test_Toolkit is public, so github.token suffices and no App credentials are needed.
-      # resolve-dependencies builds with the SDK it is given; ComplianceRunner targets
-      # net10.0 and is published by the test host, so both versions are installed below.
+      # resolve-dependencies and ComplianceRunner use SDK 10.
       - name: Resolve Test_Toolkit dependency graph
         uses: ./.github/actions/resolve-dependencies
         with:
           mode: seeds
           seeds: BHoM/Test_Toolkit
-          dotnet_version: '8.0'
+          dotnet_version: '10.0'
           configuration: Release
           token: ${{ github.token }}
 

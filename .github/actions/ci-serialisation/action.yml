@@ -42,7 +42,7 @@ inputs:
       .NET SDK version for building dependencies and publishing
       SerialiserRunner.
     required: false
-    default: '8.0'
+    default: '10.0'
   implausible_baseline_ratio:
     description: >
       POLICY VALUE, NOT A MEASUREMENT. Share of the tested population that must fail

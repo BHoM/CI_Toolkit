@@ -24,11 +24,10 @@ inputs:
   deps_dotnet_version:
     description: >
       SDK for the dependency build, passed through to resolve-dependencies,
-      which pins it at its own clone root. Separate from the caller's test
-      SDK below: the dependency graph is built on 8.0 fleet-wide and moving
-      it is a change of its own.
+      which pins it at its own clone root. This can be set independently
+      of the caller's test SDK below.
     required: false
-    default: '8.0'
+    default: '10.0'
   test_dotnet_version:
     description: >
       SDK pinned for the caller's test build, written to a generated

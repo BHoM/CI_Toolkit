@@ -17,6 +17,10 @@ inputs:
     description: Fallback token when App credentials are absent.
     required: false
     default: ""
+  deps_dotnet_version:
+    description: .NET SDK version for building the dependency graph.
+    required: false
+    default: '10.0'
 
 runs:
   using: composite
@@ -65,7 +69,7 @@ runs:
       uses: BHoM/CI_Toolkit/.github/actions/resolve-dependencies@develop
       with:
         mode: caller
-        dotnet_version: '8.0'
+        dotnet_version: ${{ inputs.deps_dotnet_version }}
         configuration: Release
         token: ${{ steps.dep-token.outputs.token }}
 
