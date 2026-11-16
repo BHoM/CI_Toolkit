@@ -98,3 +98,85 @@ Describe 'Test-TransientRestoreFailure' {
         }
     }
 }
+
+Describe 'Invoke-DotnetRestoreWithRetry' {
+
+    BeforeAll {
+        $script:transient = "$sdk\NuGet.targets(174,5): error NU1301: Unable to load the service index for source https://api.nuget.org/v3/index.json. $sln"
+        $script:genuine   = "$sdk\NuGet.targets(174,5): error NU1101: Unable to find package Not.A.Package. No packages exist with this id in source(s): nuget.org $sln"
+    }
+
+    BeforeEach {
+        $script:hostLines = [System.Collections.Generic.List[string]]::new()
+        $script:exitCodes = [System.Collections.Generic.Queue[int]]::new()
+        $script:outputs   = [System.Collections.Generic.Queue[string]]::new()
+        Mock Write-Host { $script:hostLines.Add("$Object") }
+        Mock Start-Sleep { }
+        Mock dotnet {
+            $line = $script:outputs.Dequeue()
+            $global:LASTEXITCODE = $script:exitCodes.Dequeue()
+            $line
+        }
+    }
+
+    It 'retries a transport failure, as a warning, then succeeds' {
+        $script:outputs.Enqueue($transient); $script:exitCodes.Enqueue(1)
+        $script:outputs.Enqueue('  Restored x.csproj'); $script:exitCodes.Enqueue(0)
+
+        { Invoke-DotnetRestoreWithRetry -Target 'x.sln' } | Should -Not -Throw
+
+        Should -Invoke dotnet -Times 2 -Exactly
+        $hostLines | Where-Object { $_ -like '::warning*' } | Should -HaveCount 1
+        $hostLines | Where-Object { $_ -like '::error*' }   | Should -HaveCount 0
+        # The retried attempt's output is indented, which sets it apart from the final attempt in the log.
+        $hostLines | Where-Object { $_ -eq $transient }      | Should -HaveCount 0
+        $hostLines | Where-Object { $_ -eq "    $transient" } | Should -HaveCount 1
+    }
+
+    It 'fails a genuine error on the first attempt, printed unindented' {
+        $script:outputs.Enqueue($genuine); $script:exitCodes.Enqueue(1)
+
+        { Invoke-DotnetRestoreWithRetry -Target 'x.sln' } | Should -Throw 'dotnet restore failed for x.sln'
+
+        Should -Invoke dotnet -Times 1 -Exactly
+        Should -Invoke Start-Sleep -Times 0 -Exactly
+        $hostLines | Where-Object { $_ -eq $genuine }   | Should -HaveCount 1
+        $hostLines | Where-Object { $_ -like '::warning*' } | Should -HaveCount 0
+    }
+
+    It 'keeps a retried attempt out of the dotnet problem matcher' {
+        # setup-dotnet's matcher, as registered by the pinned version. It only matches from the
+        # first column, which is what the indent relies on.
+        $matcher = '^([^\s].*)\((\d+)(?:,\d+|,\d+,\d+)?\):\s+(error|warning)\s+([a-zA-Z]+(?<!MSB)\d+):\s*(.*?)\s+\[(.*?)\]$'
+        $transient | Should -Match $matcher
+        $script:outputs.Enqueue($transient); $script:exitCodes.Enqueue(1)
+        $script:outputs.Enqueue('  Restored x.csproj'); $script:exitCodes.Enqueue(0)
+
+        Invoke-DotnetRestoreWithRetry -Target 'x.sln'
+
+        $hostLines | Where-Object { $_ -match $matcher } | Should -HaveCount 0
+    }
+
+    It 'fails a feed that answers 404 on the first attempt, without blaming the network' {
+        $script:outputs.Enqueue("C:\x\x.csproj : error NU1301: Unable to load the service index for source https://api.nuget.org/v3/no-such-index.json. [C:\x\x.sln]`nC:\x\x.csproj : error NU1301:   Response status code does not indicate success: 404 (Not Found). [C:\x\x.sln]")
+        $script:exitCodes.Enqueue(1)
+
+        $thrown = $null
+        try { Invoke-DotnetRestoreWithRetry -Target 'x.sln' } catch { $thrown = $_.Exception.Message }
+
+        $thrown | Should -Be 'dotnet restore failed for x.sln'
+        Should -Invoke dotnet -Times 1 -Exactly
+        Should -Invoke Start-Sleep -Times 0 -Exactly
+    }
+
+    It 'gives up after the last attempt and prints that attempt unindented' {
+        foreach ($i in 1..3) { $script:outputs.Enqueue($transient); $script:exitCodes.Enqueue(1) }
+
+        { Invoke-DotnetRestoreWithRetry -Target 'x.sln' } | Should -Throw '*after 3 attempts*'
+
+        Should -Invoke dotnet -Times 3 -Exactly
+        $hostLines | Where-Object { $_ -like '::warning*' }   | Should -HaveCount 2
+        $hostLines | Where-Object { $_ -eq "    $transient" } | Should -HaveCount 2
+        $hostLines | Where-Object { $_ -eq $transient }       | Should -HaveCount 1
+    }
+}
