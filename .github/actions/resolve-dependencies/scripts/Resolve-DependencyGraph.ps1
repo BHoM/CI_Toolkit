@@ -115,6 +115,15 @@ function Get-SelectedRefMarker([string]$name) {
     return $line.Split('|', 2)[1]
 }
 
+# git ls-remote exits 0 with no output when a branch does not exist, and non-zero when it could
+# not reach the remote. Reading the second as the first silently builds a different branch of the
+# dependency, which passes or fails for reasons unrelated to the pull request.
+function Assert-GitSucceeded([string]$What, [string]$OwnerRepo) {
+    if ($LASTEXITCODE -ne 0) {
+        throw "git $What failed for '$OwnerRepo' (exit $LASTEXITCODE), so which commit to build could not be decided."
+    }
+}
+
 function Clone-And-Checkout([string]$ownerRepo, [string]$ref) {
 
     $name = Get-FolderName $ownerRepo
@@ -141,6 +150,7 @@ function Clone-And-Checkout([string]$ownerRepo, [string]$ref) {
     $freshClone = -not (Test-Path (Join-Path $path ".git"))
     if ($freshClone) {
         git clone "https://github.com/$ownerRepo.git" $path --no-tags --depth 1 | Out-Null
+        Assert-GitSucceeded 'clone' $ownerRepo
     }
 
     $previousRef = if ($freshClone) { $null } else { Get-SelectedRefMarker $name }
@@ -152,9 +162,12 @@ function Clone-And-Checkout([string]$ownerRepo, [string]$ref) {
 
         if ($ref) {
             $hasHead = git ls-remote --heads origin $ref
+            Assert-GitSucceeded "ls-remote --heads $ref" $ownerRepo
             $hasTag  = git ls-remote --tags  origin $ref
+            Assert-GitSucceeded "ls-remote --tags $ref" $ownerRepo
             if ($hasHead -or $hasTag) {
                 git fetch origin $ref --depth 1 | Out-Null
+                Assert-GitSucceeded "fetch $ref" $ownerRepo
                 git checkout -q FETCH_HEAD
                 if ($LASTEXITCODE -ne 0) { throw "git checkout FETCH_HEAD failed for '$ownerRepo' (ref=$ref)" }
                 $selectedRef = $ref
@@ -165,21 +178,29 @@ function Clone-And-Checkout([string]$ownerRepo, [string]$ref) {
         }
 
         if (-not $used) {
-            $hasPrefer   = if ($Prefer)   { git ls-remote --heads origin $Prefer }   else { $null }
+            $hasPrefer = $null
+            if ($Prefer) {
+                $hasPrefer = git ls-remote --heads origin $Prefer
+                Assert-GitSucceeded "ls-remote --heads $Prefer" $ownerRepo
+            }
             $hasFallback = git ls-remote --heads origin $Fallback
+            Assert-GitSucceeded "ls-remote --heads $Fallback" $ownerRepo
             if ($hasPrefer) {
                 git fetch origin $Prefer --depth 1 | Out-Null
+                Assert-GitSucceeded "fetch $Prefer" $ownerRepo
                 git checkout -q FETCH_HEAD
                 if ($LASTEXITCODE -ne 0) { throw "git checkout FETCH_HEAD failed for '$ownerRepo' (ref=$Prefer)" }
                 $selectedRef = $Prefer
             } elseif ($hasFallback) {
                 git fetch origin $Fallback --depth 1 | Out-Null
+                Assert-GitSucceeded "fetch $Fallback" $ownerRepo
                 git checkout -q FETCH_HEAD
                 if ($LASTEXITCODE -ne 0) { throw "git checkout FETCH_HEAD failed for '$ownerRepo' (ref=$Fallback)" }
                 $selectedRef = $Fallback
             } else {
                 # Neither PR nor base branch exists on this dep; fall back to remote default.
                 git fetch origin HEAD --depth 1 | Out-Null
+                Assert-GitSucceeded "fetch HEAD" $ownerRepo
                 git checkout -q FETCH_HEAD
                 if ($LASTEXITCODE -ne 0) { throw "git checkout FETCH_HEAD failed for '$ownerRepo' (remote default)" }
                 $defaultRef = (git ls-remote --symref origin HEAD |
