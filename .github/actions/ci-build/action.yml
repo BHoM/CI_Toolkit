@@ -94,13 +94,26 @@ runs:
       id: build_release
       if: steps.changed.outputs.count != '0'
       shell: pwsh
+      env:
+        # Widens NuGet's own per-request retry, which gives up after a few seconds by default.
+        NUGET_ENHANCED_MAX_NETWORK_TRY_COUNT: '10'
+        NUGET_ENHANCED_NETWORK_RETRY_DELAY_MILLISECONDS: '3000'
       run: |
         $slnPath = "${{ steps.solution.outputs.path }}"
         $config  = "Release"
 
+        # Shared with resolve-dependencies. GITHUB_ACTION_PATH is .github/actions/ci-build,
+        # so ../../scripts is .github/scripts.
+        . (Join-Path $env:GITHUB_ACTION_PATH "../../scripts/Invoke-DotnetRestore.ps1")
+
         Write-Host "::group::dotnet restore"
-        dotnet restore $slnPath
-        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        try { Invoke-DotnetRestoreWithRetry -Target $slnPath }
+        catch {
+          Write-Host "::endgroup::"
+          $message = $_.Exception.Message -replace '%', '%25' -replace "`r", '%0D' -replace "`n", '%0A'
+          Write-Host "::error title=Restore::$message"
+          exit 1
+        }
         Write-Host "::endgroup::"
 
         Write-Host "::group::dotnet build $config"

@@ -230,6 +230,11 @@ runs:
     - name: Build dependencies
       if: steps.shas.outputs.keypart != '' && steps.cache.outputs.cache-hit != 'true'
       shell: pwsh
+      env:
+        # Widens NuGet's own per-request retry, which gives up after a few seconds by default.
+        # Invoke-DotnetRestore.ps1 retries the whole restore on top of this.
+        NUGET_ENHANCED_MAX_NETWORK_TRY_COUNT: '10'
+        NUGET_ENHANCED_NETWORK_RETRY_DELAY_MILLISECONDS: '3000'
       run: |
         $script = Join-Path $env:GITHUB_ACTION_PATH "scripts/Build-Dependencies.ps1"
         & $script -Configuration "${{ inputs.configuration }}" -CloneRoot "C:\bhom-deps"
