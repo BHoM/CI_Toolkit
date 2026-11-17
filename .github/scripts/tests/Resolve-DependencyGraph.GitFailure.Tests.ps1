@@ -176,6 +176,38 @@ Describe 'resolve-dependencies: git failures reaching the remote' {
         Should -Invoke git -ParameterFilter { $args -contains 'clone' } -Times 1 -Exactly
         Should -Invoke Start-Sleep -Times 0 -Exactly
     }
+
+    Context 'neither the preferred nor the base branch exists, so the remote default is built' {
+
+        It 'labels the selection with the default branch name' {
+            $ws   = Join-Path $sandbox 'default-ws'
+            $root = Join-Path $sandbox 'default-clones'
+            New-Item -ItemType Directory -Force -Path $ws | Out-Null
+            Set-Content -Path (Join-Path $ws 'dependencies.txt') -Value $dep -Encoding utf8
+
+            { Invoke-Resolver -Workspace $ws -CloneRoot $root -Prefer 'no-such-branch' -Fallback 'no-such-base' } |
+                Should -Not -Throw
+            Get-Content (Join-Path $ws 'deps/_selection.txt') | Should -Match "^$([regex]::Escape($dep))\|Dep\|develop\|[0-9a-f]{40}$"
+        }
+
+        It 'still builds when the lookup that only names the default branch fails' {
+            # ls-remote --symref runs after the default branch is already fetched and checked out,
+            # and only supplies its name for the summary. Its failure must not fail the resolution.
+            $ws   = Join-Path $sandbox 'symref-ws'
+            $root = Join-Path $sandbox 'symref-clones'
+            New-Item -ItemType Directory -Force -Path $ws | Out-Null
+            Set-Content -Path (Join-Path $ws 'dependencies.txt') -Value $dep -Encoding utf8
+
+            Mock git -ParameterFilter { $args -contains '--symref' } -MockWith { $global:LASTEXITCODE = 128 }
+
+            { Invoke-Resolver -Workspace $ws -CloneRoot $root -Prefer 'no-such-branch' -Fallback 'no-such-base' } |
+                Should -Not -Throw
+            Should -Invoke git -ParameterFilter { $args -contains '--symref' } -Times 1 -Exactly
+            Get-Content (Join-Path $ws 'deps/_selection.txt') | Should -Match "^$([regex]::Escape($dep))\|Dep\|\(remote default\)\|[0-9a-f]{40}$"
+            # The step's exit code is the last native command's, so a leftover 128 would fail it.
+            $global:LASTEXITCODE | Should -Be 0
+        }
+    }
 }
 
 Describe 'resolve-dependencies action: a resolver failure is annotated with its reason' {
