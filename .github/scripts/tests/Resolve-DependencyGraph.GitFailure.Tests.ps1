@@ -75,6 +75,12 @@ AfterAll {
 
 Describe 'resolve-dependencies: git failures reaching the remote' {
 
+    BeforeEach {
+        # Read and changed in place from mock bodies, which run in the resolver's script scope,
+        # so it is referenced unqualified rather than as $script:.
+        $script:state = @{ Lookups = 0; Warnings = [System.Collections.Generic.List[string]]::new() }
+    }
+
     AfterEach {
         if (Test-Path "$bare.moved") { Move-Item "$bare.moved" $bare }
     }
@@ -113,8 +119,96 @@ Describe 'resolve-dependencies: git failures reaching the remote' {
         New-Item -ItemType Directory -Force -Path $ws | Out-Null
         Set-Content -Path (Join-Path $ws 'dependencies.txt') -Value $dep -Encoding utf8
 
+        Mock Start-Sleep { }
         Move-Item $bare "$bare.moved"
+        # Real git output, so this also shows its stderr is captured and quoted, and that a remote
+        # git does not recognise as a network failure is not retried.
         { Invoke-Resolver -Workspace $ws -CloneRoot $root -Prefer $prefer -Fallback 'develop' } |
-            Should -Throw '*git clone failed*'
+            Should -Throw '*git clone failed*git said: fatal:*'
+        Should -Invoke Start-Sleep -Times 0 -Exactly
+    }
+
+    It 'retries a lookup that failed on a network error, then builds the requested branch' {
+        $ws   = Join-Path $sandbox 'retry-ws'
+        $root = Join-Path $sandbox 'retry-clones'
+        New-Item -ItemType Directory -Force -Path $ws | Out-Null
+        Set-Content -Path (Join-Path $ws 'dependencies.txt') -Value $dep -Encoding utf8
+
+        Mock Start-Sleep { }
+        Mock Write-Host { if ("$Object" -like '::warning*') { $state.Warnings.Add("$Object") } }
+        Mock git -ParameterFilter { $args -contains 'ls-remote' -and $args -contains $prefer } -MockWith {
+            $state.Lookups++
+            if ($state.Lookups -eq 1) {
+                [System.Management.Automation.ErrorRecord]::new(
+                    [System.Exception]::new("fatal: unable to access 'https://github.com/$dep.git/': Could not resolve host: github.com"),
+                    'NativeCommandError', 'NotSpecified', $null)
+                $global:LASTEXITCODE = 128
+                return
+            }
+            & (Get-Command git -CommandType Application | Select-Object -First 1) @args
+        }
+
+        { Invoke-Resolver -Workspace $ws -CloneRoot $root -Prefer $prefer -Fallback 'develop' } |
+            Should -Not -Throw
+        $state.Lookups | Should -Be 2
+        Should -Invoke Start-Sleep -Times 1 -Exactly
+        $state.Warnings | Should -HaveCount 1
+        Get-Content (Join-Path $ws 'deps/_selection.txt') | Should -Match "^$([regex]::Escape($dep))\|Dep\|$([regex]::Escape($prefer))\|"
+    }
+
+    It 'fails a repository that does not exist on the first attempt' {
+        # GitHub answers a missing repository, and one the token cannot read, the same way.
+        $ws   = Join-Path $sandbox 'missing-ws'
+        $root = Join-Path $sandbox 'missing-clones'
+        New-Item -ItemType Directory -Force -Path $ws | Out-Null
+        Set-Content -Path (Join-Path $ws 'dependencies.txt') -Value $dep -Encoding utf8
+
+        Mock Start-Sleep { }
+        Mock git -ParameterFilter { $args -contains 'clone' } -MockWith {
+            foreach ($line in @('remote: Repository not found.', "fatal: repository 'https://github.com/$dep.git/' not found")) {
+                [System.Management.Automation.ErrorRecord]::new([System.Exception]::new($line), 'NativeCommandError', 'NotSpecified', $null)
+            }
+            $global:LASTEXITCODE = 128
+        }
+
+        { Invoke-Resolver -Workspace $ws -CloneRoot $root -Prefer $prefer -Fallback 'develop' } |
+            Should -Throw "git clone failed for '$dep' (exit 128)*not found"
+        Should -Invoke git -ParameterFilter { $args -contains 'clone' } -Times 1 -Exactly
+        Should -Invoke Start-Sleep -Times 0 -Exactly
+    }
+}
+
+Describe 'resolve-dependencies action: a resolver failure is annotated with its reason' {
+
+    It 'turns the thrown message into an ::error annotation and exits 1' {
+        # Runs the step's own script from action.yml against a stand-in resolver that throws, with
+        # the preamble GitHub adds for shell: pwsh, so the wrapper is tested rather than its text.
+        $actionYml = Join-Path $repoRoot '.github/actions/resolve-dependencies/action.yml'
+        $lines = Get-Content $actionYml
+        $start = [Array]::IndexOf($lines, '    - name: Resolve dependency graph')
+        $start | Should -BeGreaterThan -1
+        $run = $null
+        for ($i = $start + 1; $i -lt $lines.Count -and $lines[$i] -notmatch '^    - name:'; $i++) {
+            if ($null -ne $run) { $run += ,($lines[$i] -replace '^        ', '') }
+            elseif ($lines[$i] -eq '      run: |') { $run = @() }
+        }
+        $body = ($run -join "`n") -replace '\$\{\{[^}]*\}\}', ''
+
+        $actionPath = Join-Path $sandbox 'step-action'
+        New-Item -ItemType Directory -Force -Path (Join-Path $actionPath 'scripts') | Out-Null
+        Set-Content -Path (Join-Path $actionPath 'scripts/Resolve-DependencyGraph.ps1') -Encoding utf8 -Value @'
+param($DepsFile, $Mode, $Seeds, $AdditionalSeeds, $CloneRoot)
+throw "git clone failed for 'Fake/Dep' (exit 128), 100% sure"
+'@
+        $step = Join-Path $sandbox 'step.ps1'
+        Set-Content -Path $step -Encoding utf8 -Value ("`$ErrorActionPreference = 'stop'`n" + $body)
+
+        $env:GITHUB_ACTION_PATH = $actionPath
+        # In-process: exit inside a script file ends that script only and sets $LASTEXITCODE.
+        try { $out = & $step *>&1 | ForEach-Object { "$_" } }
+        finally { Remove-Item Env:GITHUB_ACTION_PATH }
+
+        $LASTEXITCODE | Should -Be 1
+        $out | Should -Contain "::error title=Dependencies::git clone failed for 'Fake/Dep' (exit 128), 100%25 sure"
     }
 }
