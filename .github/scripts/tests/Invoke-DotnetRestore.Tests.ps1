@@ -107,6 +107,8 @@ Describe 'Invoke-DotnetRestoreWithRetry' {
     }
 
     BeforeEach {
+        # Fresh per test: the script keeps "the feed is down" state for the rest of a run.
+        . (Join-Path $PSScriptRoot '../Invoke-DotnetRestore.ps1')
         $script:hostLines = [System.Collections.Generic.List[string]]::new()
         $script:exitCodes = [System.Collections.Generic.Queue[int]]::new()
         $script:outputs   = [System.Collections.Generic.Queue[string]]::new()
@@ -167,6 +169,30 @@ Describe 'Invoke-DotnetRestoreWithRetry' {
         $thrown | Should -Be 'dotnet restore failed for x.sln'
         Should -Invoke dotnet -Times 1 -Exactly
         Should -Invoke Start-Sleep -Times 0 -Exactly
+    }
+
+    It 'makes one attempt per restore for the rest of the run once an earlier one used every attempt' {
+        foreach ($i in 1..3) { $script:outputs.Enqueue($transient); $script:exitCodes.Enqueue(1) }
+        { Invoke-DotnetRestoreWithRetry -Target 'a.sln' } | Should -Throw '*after 3 attempts*'
+        Should -Invoke dotnet -Times 3 -Exactly
+
+        # The feed is evidently down: the next dependency's restore is not retried.
+        $script:outputs.Enqueue($transient); $script:exitCodes.Enqueue(1)
+        { Invoke-DotnetRestoreWithRetry -Target 'b.sln' } | Should -Throw '*not retried because an earlier restore*not a fault*'
+        Should -Invoke dotnet -Times 4 -Exactly
+
+        # A genuine error is still reported as one, not as the outage.
+        $script:outputs.Enqueue($genuine); $script:exitCodes.Enqueue(1)
+        { Invoke-DotnetRestoreWithRetry -Target 'c.sln' } | Should -Throw 'dotnet restore failed for c.sln'
+
+        # A later success, which may not have touched the feed, leaves the flag set.
+        $script:outputs.Enqueue('  Restored d.csproj'); $script:exitCodes.Enqueue(0)
+        Invoke-DotnetRestoreWithRetry -Target 'd.sln'
+        $script:RestoreFeedUnreachable | Should -BeTrue
+        $script:outputs.Enqueue($transient); $script:exitCodes.Enqueue(1)
+        { Invoke-DotnetRestoreWithRetry -Target 'e.sln' } | Should -Throw '*not retried because an earlier restore*'
+        Should -Invoke dotnet -Times 7 -Exactly
+        Should -Invoke Start-Sleep -Times 2 -Exactly
     }
 
     It 'gives up after the last attempt and prints that attempt unindented' {

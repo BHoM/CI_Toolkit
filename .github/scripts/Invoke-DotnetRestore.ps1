@@ -32,6 +32,12 @@ $script:PermanentRestorePatterns = @(
     "local source '[^']*' doesn't exist"
 )
 
+# Set once a restore has used every attempt on network errors. The feed is then evidently down, so
+# later restores in the same run make a single attempt rather than each waiting out the outage. It
+# stays set for the rest of the run: a later restore can succeed from the local package folder
+# without reaching the feed, so a success does not show the feed is back.
+$script:RestoreFeedUnreachable = $false
+
 function Test-TransientRestoreFailure {
     param([Parameter(Mandatory)][AllowEmptyCollection()][AllowEmptyString()][string[]]$Output)
 
@@ -56,13 +62,15 @@ function Invoke-DotnetRestoreWithRetry {
         [int[]]$DelaySeconds = @(15, 45)
     )
 
-    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+    $attempts = if ($script:RestoreFeedUnreachable) { 1 } else { $MaxAttempts }
+
+    for ($attempt = 1; $attempt -le $attempts; $attempt++) {
         # Buffered rather than streamed: whether this attempt's output is final is only known
         # once it exits, and a retried attempt is printed differently from the final one.
         $output = @(dotnet restore $Target 2>&1 | ForEach-Object { "$_" })
         $exitCode = $LASTEXITCODE
 
-        $willRetry = $exitCode -ne 0 -and $attempt -lt $MaxAttempts -and
+        $willRetry = $exitCode -ne 0 -and $attempt -lt $attempts -and
                      (Test-TransientRestoreFailure -Output $output)
 
         if ($willRetry) {
@@ -80,6 +88,10 @@ function Invoke-DotnetRestoreWithRetry {
 
         if (-not $willRetry) {
             if (Test-TransientRestoreFailure -Output $output) {
+                if ($attempts -lt $MaxAttempts) {
+                    throw "dotnet restore failed for $Target on a network error reaching the package feed, and was not retried because an earlier restore in this run already failed after $MaxAttempts attempts. This is not a fault in the change under review; re-run the check."
+                }
+                $script:RestoreFeedUnreachable = $true
                 throw "dotnet restore failed for $Target after $MaxAttempts attempts, each on a network error reaching the package feed. This is not a fault in the change under review; re-run the check."
             }
             throw "dotnet restore failed for $Target"
