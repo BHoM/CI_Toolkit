@@ -45,5 +45,7 @@ function Invoke-DotnetRestoreWithRetry { param($Target) throw "dotnet restore fa
 
         $LASTEXITCODE | Should -Be 1
         $out | Should -Contain '::error title=Restore::dotnet restore failed, 100%25 sure%0Asecond line'
+        # The stack trace names the script and line the error came from.
+        ($out -join "`n") | Should -Match 'Invoke-DotnetRestore\.ps1: line 1'
     }
 }

@@ -242,5 +242,7 @@ throw "git clone failed for 'Fake/Dep' (exit 128), 100% sure"
 
         $LASTEXITCODE | Should -Be 1
         $out | Should -Contain "::error title=Dependencies::git clone failed for 'Fake/Dep' (exit 128), 100%25 sure"
+        # The stack trace names the script and line the error came from.
+        ($out -join "`n") | Should -Match 'Resolve-DependencyGraph\.ps1: line 2'
     }
 }

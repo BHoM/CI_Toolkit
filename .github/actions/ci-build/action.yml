@@ -110,6 +110,8 @@ runs:
         try { Invoke-DotnetRestoreWithRetry -Target $slnPath }
         catch {
           Write-Host "::endgroup::"
+          # Where it was thrown, so an unexpected error still points at its line.
+          Write-Host $_.ScriptStackTrace
           $message = $_.Exception.Message -replace '%', '%25' -replace "`r", '%0D' -replace "`n", '%0A'
           Write-Host "::error title=Restore::$message"
           exit 1
