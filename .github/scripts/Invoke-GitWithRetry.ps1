@@ -1,10 +1,14 @@
 # Retries a git call to a dependency's remote that exits non-zero.
 #
 # A dropped connection during a lookup fails the whole check for a reason that has nothing to do
-# with the change under review. Every call made through this succeeds on a normal path: ls-remote
-# exits 0 with no output for a branch that does not exist, and a fetch is only made for a ref
-# ls-remote has just listed. So any failure is retried, without trying to tell a network error
-# from a missing or unreadable repository by its message. Those fail too, after the retries.
+# with the change under review. On the usual paths these calls succeed: ls-remote exits 0 with no
+# output for a branch that does not exist, and a fetch is made only after ls-remote has listed the
+# ref. So any failure is retried, without trying to tell a network error from a missing or
+# unreadable repository by its message. Those fail too, after the retries.
+#
+# One known exception: ls-remote --heads matches the end of a branch name, so a lookup of "foo"
+# also lists "feature/foo", and the fetch of "foo" that follows fails. That failed before retries
+# were added, and now fails after them.
 #
 # Same attempts and waits as the restore retry in Invoke-DotnetRestore.ps1.
 

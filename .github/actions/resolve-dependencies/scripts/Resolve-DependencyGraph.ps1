@@ -121,8 +121,8 @@ function Get-SelectedRefMarker([string]$name) {
 # git ls-remote exits 0 with no output when a branch does not exist, and non-zero when it could
 # not reach the remote. Reading the second as the first silently builds a different branch of the
 # dependency, which passes or fails for reasons unrelated to the pull request. So every call that
-# decides which commit is built goes through Invoke-GitWithRetry, which retries a network error
-# and throws on any other failure.
+# decides which commit is built goes through Invoke-GitWithRetry, which retries any non-zero exit
+# and then throws.
 function Clone-And-Checkout([string]$ownerRepo, [string]$ref) {
 
     $name = Get-FolderName $ownerRepo
