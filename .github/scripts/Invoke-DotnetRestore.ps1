@@ -55,6 +55,9 @@ function Test-TransientRestoreFailure {
     return $true
 }
 
+# Retry settings. The git side uses the same attempts and waits, in Invoke-GitWithRetry.ps1.
+# NuGet's own per-request retry is widened separately, by NUGET_ENHANCED_* in two places:
+# ci-build/action.yml ("Build (Release)") and resolve-dependencies/action.yml ("Build dependencies").
 function Invoke-DotnetRestoreWithRetry {
     param(
         [Parameter(Mandatory)][string]$Target,

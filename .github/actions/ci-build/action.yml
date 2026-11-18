@@ -96,6 +96,8 @@ runs:
       shell: pwsh
       env:
         # Widens NuGet's own per-request retry, which gives up after a few seconds by default.
+        # Same values as resolve-dependencies/action.yml ("Build dependencies"); keep them together.
+        # The whole-restore retry is set in .github/scripts/Invoke-DotnetRestore.ps1.
         NUGET_ENHANCED_MAX_NETWORK_TRY_COUNT: '10'
         NUGET_ENHANCED_NETWORK_RETRY_DELAY_MILLISECONDS: '3000'
       run: |

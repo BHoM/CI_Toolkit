@@ -244,6 +244,7 @@ runs:
       env:
         # Widens NuGet's own per-request retry, which gives up after a few seconds by default.
         # Invoke-DotnetRestore.ps1 retries the whole restore on top of this.
+        # Same values as ci-build/action.yml ("Build (Release)"); keep them together.
         NUGET_ENHANCED_MAX_NETWORK_TRY_COUNT: '10'
         NUGET_ENHANCED_NETWORK_RETRY_DELAY_MILLISECONDS: '3000'
       run: |
