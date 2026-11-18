@@ -95,7 +95,7 @@ Describe 'resolve-dependencies: git failures reaching the remote' {
             Should -Not -Throw
     }
 
-    It 'fails, rather than building the base branch, when only the preferred-branch lookup fails' {
+    It 'fails, rather than building the base branch, when the preferred-branch lookup keeps failing' {
         # One request failing while the next succeeds is the ordinary shape of a network blip.
         # Before the check, the empty output read as "no such branch" and the dependency was
         # built from develop instead of the pull request's matching branch, with no error.
@@ -104,13 +104,14 @@ Describe 'resolve-dependencies: git failures reaching the remote' {
         New-Item -ItemType Directory -Force -Path $ws | Out-Null
         Set-Content -Path (Join-Path $ws 'dependencies.txt') -Value $dep -Encoding utf8
 
+        Mock Start-Sleep { }
         Mock git -ParameterFilter { $args -contains 'ls-remote' -and $args -contains $prefer } -MockWith {
             $global:LASTEXITCODE = 128
         }
 
         { Invoke-Resolver -Workspace $ws -CloneRoot $root -Prefer $prefer -Fallback 'develop' } |
-            Should -Throw "*ls-remote --heads $prefer*could not be decided*"
-        Should -Invoke git -ParameterFilter { $args -contains 'ls-remote' -and $args -contains $prefer } -Times 1 -Exactly
+            Should -Throw "*ls-remote --heads $prefer*after 3 attempts*could not be decided*"
+        Should -Invoke git -ParameterFilter { $args -contains 'ls-remote' -and $args -contains $prefer } -Times 3 -Exactly
     }
 
     It 'fails a fresh clone that cannot reach the remote, naming the clone' {
@@ -121,14 +122,13 @@ Describe 'resolve-dependencies: git failures reaching the remote' {
 
         Mock Start-Sleep { }
         Move-Item $bare "$bare.moved"
-        # Real git output, so this also shows its stderr is captured and quoted, and that a remote
-        # git does not recognise as a network failure is not retried.
+        # Real git output, so this also shows its stderr is captured and quoted.
         { Invoke-Resolver -Workspace $ws -CloneRoot $root -Prefer $prefer -Fallback 'develop' } |
-            Should -Throw '*git clone failed*git said: fatal:*'
-        Should -Invoke Start-Sleep -Times 0 -Exactly
+            Should -Throw '*git clone failed*after 3 attempts*git said: fatal:*'
+        Should -Invoke Start-Sleep -Times 2 -Exactly
     }
 
-    It 'retries a lookup that failed on a network error, then builds the requested branch' {
+    It 'retries a lookup that failed once, then builds the requested branch' {
         $ws   = Join-Path $sandbox 'retry-ws'
         $root = Join-Path $sandbox 'retry-clones'
         New-Item -ItemType Directory -Force -Path $ws | Out-Null
@@ -156,8 +156,9 @@ Describe 'resolve-dependencies: git failures reaching the remote' {
         Get-Content (Join-Path $ws 'deps/_selection.txt') | Should -Match "^$([regex]::Escape($dep))\|Dep\|$([regex]::Escape($prefer))\|"
     }
 
-    It 'fails a repository that does not exist on the first attempt' {
-        # GitHub answers a missing repository, and one the token cannot read, the same way.
+    It 'retries, then fails, a repository that does not exist' {
+        # GitHub answers a missing repository, and one the token cannot read, the same way. Neither
+        # is told apart from a network error: both are retried, then fail naming the repository.
         $ws   = Join-Path $sandbox 'missing-ws'
         $root = Join-Path $sandbox 'missing-clones'
         New-Item -ItemType Directory -Force -Path $ws | Out-Null
@@ -172,9 +173,9 @@ Describe 'resolve-dependencies: git failures reaching the remote' {
         }
 
         { Invoke-Resolver -Workspace $ws -CloneRoot $root -Prefer $prefer -Fallback 'develop' } |
-            Should -Throw "git clone failed for '$dep' (exit 128)*not found"
-        Should -Invoke git -ParameterFilter { $args -contains 'clone' } -Times 1 -Exactly
-        Should -Invoke Start-Sleep -Times 0 -Exactly
+            Should -Throw "git clone failed for '$dep' after 3 attempts (exit 128)*not found"
+        Should -Invoke git -ParameterFilter { $args -contains 'clone' } -Times 3 -Exactly
+        Should -Invoke Start-Sleep -Times 2 -Exactly
     }
 
     Context 'neither the preferred nor the base branch exists, so the remote default is built' {
