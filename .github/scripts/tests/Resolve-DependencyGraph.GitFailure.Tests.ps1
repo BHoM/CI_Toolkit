@@ -104,7 +104,9 @@ Describe 'resolve-dependencies: git failures reaching the remote' {
         New-Item -ItemType Directory -Force -Path $ws | Out-Null
         Set-Content -Path (Join-Path $ws 'dependencies.txt') -Value $dep -Encoding utf8
 
+        # Retry warnings would otherwise become annotations on this repository's own check.
         Mock Start-Sleep { }
+        Mock Write-Host -ParameterFilter { "$Object" -like '::warning*' } -MockWith { }
         Mock git -ParameterFilter { $args -contains 'ls-remote' -and $args -contains $prefer } -MockWith {
             $global:LASTEXITCODE = 128
         }
@@ -112,6 +114,7 @@ Describe 'resolve-dependencies: git failures reaching the remote' {
         { Invoke-Resolver -Workspace $ws -CloneRoot $root -Prefer $prefer -Fallback 'develop' } |
             Should -Throw "*ls-remote --heads $prefer*after 3 attempts*could not be decided*"
         Should -Invoke git -ParameterFilter { $args -contains 'ls-remote' -and $args -contains $prefer } -Times 3 -Exactly
+        Should -Invoke Write-Host -ParameterFilter { "$Object" -like '::warning*' } -Times 2 -Exactly
     }
 
     It 'fails a fresh clone that cannot reach the remote, naming the clone' {
@@ -121,11 +124,13 @@ Describe 'resolve-dependencies: git failures reaching the remote' {
         Set-Content -Path (Join-Path $ws 'dependencies.txt') -Value $dep -Encoding utf8
 
         Mock Start-Sleep { }
+        Mock Write-Host -ParameterFilter { "$Object" -like '::warning*' } -MockWith { }
         Move-Item $bare "$bare.moved"
         # Real git output, so this also shows its stderr is captured and quoted.
         { Invoke-Resolver -Workspace $ws -CloneRoot $root -Prefer $prefer -Fallback 'develop' } |
             Should -Throw '*git clone failed*after 3 attempts*git said: fatal:*'
         Should -Invoke Start-Sleep -Times 2 -Exactly
+        Should -Invoke Write-Host -ParameterFilter { "$Object" -like '::warning*' } -Times 2 -Exactly
     }
 
     It 'retries a lookup that failed once, then builds the requested branch' {
@@ -165,6 +170,7 @@ Describe 'resolve-dependencies: git failures reaching the remote' {
         Set-Content -Path (Join-Path $ws 'dependencies.txt') -Value $dep -Encoding utf8
 
         Mock Start-Sleep { }
+        Mock Write-Host -ParameterFilter { "$Object" -like '::warning*' } -MockWith { }
         Mock git -ParameterFilter { $args -contains 'clone' } -MockWith {
             foreach ($line in @('remote: Repository not found.', "fatal: repository 'https://github.com/$dep.git/' not found")) {
                 [System.Management.Automation.ErrorRecord]::new([System.Exception]::new($line), 'NativeCommandError', 'NotSpecified', $null)
@@ -176,6 +182,7 @@ Describe 'resolve-dependencies: git failures reaching the remote' {
             Should -Throw "git clone failed for '$dep' after 3 attempts (exit 128)*not found"
         Should -Invoke git -ParameterFilter { $args -contains 'clone' } -Times 3 -Exactly
         Should -Invoke Start-Sleep -Times 2 -Exactly
+        Should -Invoke Write-Host -ParameterFilter { "$Object" -like '::warning*' } -Times 2 -Exactly
     }
 
     Context 'neither the preferred nor the base branch exists, so the remote default is built' {
