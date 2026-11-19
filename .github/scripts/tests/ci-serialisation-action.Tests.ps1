@@ -85,4 +85,59 @@ Describe 'ci-serialisation action.yml' {
             $resets | Should -BeNullOrEmpty -Because "resolve-dependencies resets this directory in its own Prepare folders step, so a reset here is redundant and reads as the between-legs separation when it is not:`n$($resets -join "`n")"
         }
     }
+
+    Context 'Verification.sln comes from the repository under test when that is the engine' {
+
+        # When BHoM_Engine is the caller its dependency clone may be on another branch (fork pull
+        # requests, push runs), so its own checkout must win; every other caller keeps the clone
+        # first. Runs the step's own script, extracted as text, in a separate PowerShell instance
+        # because the step can exit.
+        BeforeAll {
+            $start = ($lines | Select-String -Pattern '^\s*- name:\s*Locate Verification\.sln\s*$' | Select-Object -First 1).LineNumber
+            $start | Should -Not -BeNullOrEmpty -Because 'the step this tests has been renamed or removed'
+            $runAt = $start
+            while ($lines[$runAt] -notmatch '^\s*run:\s*\|\s*$') { $runAt++ }
+            $indent = ($lines[$runAt + 1] -replace '^(\s*).*$', '$1').Length
+            $body = @()
+            for ($i = $runAt + 1; $i -lt $lines.Count; $i++) {
+                if ($lines[$i] -match '\S' -and ($lines[$i] -replace '^(\s*).*$', '$1').Length -lt $indent) { break }
+                $body += if ($lines[$i].Length -ge $indent) { $lines[$i].Substring($indent) } else { '' }
+            }
+            $script:locateScript = $body -join "`n"
+            $script:locateScript | Should -Match 'Verification\.sln' -Because 'if this finds nothing the extraction has drifted and the tests are vacuous'
+
+            function script:Invoke-Locate([string]$Repository, [string]$EngineRepo, [bool]$CloneHasSln, [bool]$WorkspaceHasSln) {
+                $root = Join-Path ([IO.Path]::GetTempPath()) ([Guid]::NewGuid().ToString('N'))
+                $workspace = Join-Path $root 'ws'; $deps = Join-Path $root 'deps'
+                if ($WorkspaceHasSln) { New-Item -ItemType Directory -Force (Join-Path $workspace '.ci\code') | Out-Null; Set-Content (Join-Path $workspace '.ci\code\Verification.sln') '' }
+                if ($CloneHasSln)     { New-Item -ItemType Directory -Force (Join-Path $deps 'BHoM_Engine\.ci\code') | Out-Null; Set-Content (Join-Path $deps 'BHoM_Engine\.ci\code\Verification.sln') '' }
+                $text = $script:locateScript.Replace('${{ inputs.serialisation_engine_repo }}', $EngineRepo).Replace('${{ github.workspace }}', $workspace).Replace('${{ github.repository }}', $Repository).Replace('C:\bhom-deps', $deps)
+                $outputPath = Join-Path $root 'output.txt'; Set-Content $outputPath ''
+                $env:GITHUB_OUTPUT = $outputPath
+                $ps = [powershell]::Create()
+                try { [void]$ps.AddScript($text); [void]$ps.Invoke() } finally { $ps.Dispose() }
+                $found = (Get-Content $outputPath | Where-Object { $_ -like 'path=*' } | Select-Object -First 1) -replace '^path=', ''
+                Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue
+                if ($found) { $found.Replace($workspace, 'workspace').Replace($deps, 'clone') } else { $null }
+            }
+        }
+
+        AfterAll { Remove-Item Env:GITHUB_OUTPUT -ErrorAction SilentlyContinue }
+
+        It 'takes the workspace copy when the caller is the engine repository' {
+            Invoke-Locate 'BHoM/BHoM_Engine' 'BHoM/BHoM_Engine' $true $true | Should -BeLike 'workspace*'
+        }
+
+        It 'matches the engine repository case-insensitively' {
+            Invoke-Locate 'bhom/bhom_engine' 'BHoM/BHoM_Engine' $true $true | Should -BeLike 'workspace*'
+        }
+
+        It 'keeps the clone first for any other caller, even when the caller ships its own' {
+            Invoke-Locate 'BHoM/Revit_Toolkit' 'BHoM/BHoM_Engine' $true $true | Should -BeLike 'clone*'
+        }
+
+        It 'falls back to the clone when the engine repository has no workspace copy' {
+            Invoke-Locate 'BHoM/BHoM_Engine' 'BHoM/BHoM_Engine' $true $false | Should -BeLike 'clone*'
+        }
+    }
 }
