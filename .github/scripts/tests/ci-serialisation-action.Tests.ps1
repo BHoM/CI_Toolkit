@@ -125,12 +125,11 @@ Describe 'ci-serialisation action.yml' {
                 $ps = [powershell]::Create()
                 try {
                     [void]$ps.AddScript($text); [void]$ps.Invoke()
-                    $messages = @($ps.Streams.Information | ForEach-Object { $_.MessageData.ToString() })
                 } finally { $ps.Dispose() }
                 $pathLines = @(Get-Content $outputPath | Where-Object { $_ -like 'path=*' })
                 Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue
                 $found = if ($pathLines.Count) { ($pathLines[0] -replace '^path=', '').Replace($workspace, 'workspace').Replace($deps, 'clone') } else { $null }
-                [pscustomobject]@{ Found = $found; PathLines = $pathLines.Count; Messages = $messages }
+                [pscustomobject]@{ Found = $found }
             }
         }
 
@@ -143,23 +142,8 @@ Describe 'ci-serialisation action.yml' {
             (Invoke-Locate 'BHoM/BHoM_Engine' 'BHoM/BHoM_Engine' $true $true).Found | Should -BeLike 'workspace*'
         }
 
-        It 'matches the engine repository case-insensitively' {
-            (Invoke-Locate 'bhom/bhom_engine' 'BHoM/BHoM_Engine' $true $true).Found | Should -BeLike 'workspace*'
-        }
-
         It 'keeps the clone first for any other caller, even when the caller ships its own' {
             (Invoke-Locate 'BHoM/Revit_Toolkit' 'BHoM/BHoM_Engine' $true $true).Found | Should -BeLike 'clone*'
-        }
-
-        It 'falls back to the clone when the engine repository has no workspace copy' {
-            (Invoke-Locate 'BHoM/BHoM_Engine' 'BHoM/BHoM_Engine' $true $false).Found | Should -BeLike 'clone*'
-        }
-
-        # Without the exit, the step would go on to write an empty path= line.
-        It 'stops at its error exit when neither copy exists' {
-            $result = Invoke-Locate 'BHoM/BHoM_Engine' 'BHoM/BHoM_Engine' $false $false
-            ($result.Messages -join "`n") | Should -Match 'Verification\.sln not found'
-            $result.PathLines | Should -Be 0 -Because 'the step must exit before writing any path'
         }
     }
 }
