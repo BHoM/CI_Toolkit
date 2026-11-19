@@ -1,7 +1,7 @@
 # ci-serialisation-action.Tests.ps1 — structural assertions over ci-serialisation's action.yml.
 #
 # These test the shape of the workflow file rather than any script it calls. That is unusual
-# here, and deliberate: all three properties below are invariants a reader cannot check by
+# here, and deliberate: the three structural properties below are invariants a reader cannot check by
 # looking at one place in the file, and each of them was broken in a way that produced no
 # failure anywhere. A composite action with a dozen steps has emergent properties, and nothing
 # else in this repository asserts one.
@@ -10,6 +10,11 @@
 # nothing else, and adding a YAML module to reach three line-shaped facts would cost more than
 # it returns. Each assertion below is written so that a restructure fails it loudly rather than
 # passing vacuously.
+#
+# One Context, 'Verification.sln comes from the repository under test when that is the engine',
+# executes code instead: it extracts the Locate Verification.sln step's own script as text and
+# runs it in a separate PowerShell instance against temporary folders, because which solution the
+# step picks is behaviour rather than shape.
 #
 # Run locally:  pwsh -Command "Invoke-Pester .github/scripts/tests -Output Detailed"
 # Run in CI:    lint-workflows.yml, the powershell-tests job.
@@ -93,6 +98,8 @@ Describe 'ci-serialisation action.yml' {
         # first. Runs the step's own script, extracted as text, in a separate PowerShell instance
         # because the step can exit.
         BeforeAll {
+            $script:savedGitHubOutput = $env:GITHUB_OUTPUT
+
             $start = ($lines | Select-String -Pattern '^\s*- name:\s*Locate Verification\.sln\s*$' | Select-Object -First 1).LineNumber
             $start | Should -Not -BeNullOrEmpty -Because 'the step this tests has been renamed or removed'
             $runAt = $start
@@ -108,6 +115,7 @@ Describe 'ci-serialisation action.yml' {
 
             function script:Invoke-Locate([string]$Repository, [string]$EngineRepo, [bool]$CloneHasSln, [bool]$WorkspaceHasSln) {
                 $root = Join-Path ([IO.Path]::GetTempPath()) ([Guid]::NewGuid().ToString('N'))
+                New-Item -ItemType Directory -Force $root | Out-Null
                 $workspace = Join-Path $root 'ws'; $deps = Join-Path $root 'deps'
                 if ($WorkspaceHasSln) { New-Item -ItemType Directory -Force (Join-Path $workspace '.ci\code') | Out-Null; Set-Content (Join-Path $workspace '.ci\code\Verification.sln') '' }
                 if ($CloneHasSln)     { New-Item -ItemType Directory -Force (Join-Path $deps 'BHoM_Engine\.ci\code') | Out-Null; Set-Content (Join-Path $deps 'BHoM_Engine\.ci\code\Verification.sln') '' }
@@ -115,29 +123,43 @@ Describe 'ci-serialisation action.yml' {
                 $outputPath = Join-Path $root 'output.txt'; Set-Content $outputPath ''
                 $env:GITHUB_OUTPUT = $outputPath
                 $ps = [powershell]::Create()
-                try { [void]$ps.AddScript($text); [void]$ps.Invoke() } finally { $ps.Dispose() }
-                $found = (Get-Content $outputPath | Where-Object { $_ -like 'path=*' } | Select-Object -First 1) -replace '^path=', ''
+                try {
+                    [void]$ps.AddScript($text); [void]$ps.Invoke()
+                    $messages = @($ps.Streams.Information | ForEach-Object { $_.MessageData.ToString() })
+                } finally { $ps.Dispose() }
+                $pathLines = @(Get-Content $outputPath | Where-Object { $_ -like 'path=*' })
                 Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue
-                if ($found) { $found.Replace($workspace, 'workspace').Replace($deps, 'clone') } else { $null }
+                $found = if ($pathLines.Count) { ($pathLines[0] -replace '^path=', '').Replace($workspace, 'workspace').Replace($deps, 'clone') } else { $null }
+                [pscustomobject]@{ Found = $found; PathLines = $pathLines.Count; Messages = $messages }
             }
         }
 
-        AfterAll { Remove-Item Env:GITHUB_OUTPUT -ErrorAction SilentlyContinue }
+        AfterAll {
+            if ($null -eq $script:savedGitHubOutput) { Remove-Item Env:GITHUB_OUTPUT -ErrorAction SilentlyContinue }
+            else { $env:GITHUB_OUTPUT = $script:savedGitHubOutput }
+        }
 
         It 'takes the workspace copy when the caller is the engine repository' {
-            Invoke-Locate 'BHoM/BHoM_Engine' 'BHoM/BHoM_Engine' $true $true | Should -BeLike 'workspace*'
+            (Invoke-Locate 'BHoM/BHoM_Engine' 'BHoM/BHoM_Engine' $true $true).Found | Should -BeLike 'workspace*'
         }
 
         It 'matches the engine repository case-insensitively' {
-            Invoke-Locate 'bhom/bhom_engine' 'BHoM/BHoM_Engine' $true $true | Should -BeLike 'workspace*'
+            (Invoke-Locate 'bhom/bhom_engine' 'BHoM/BHoM_Engine' $true $true).Found | Should -BeLike 'workspace*'
         }
 
         It 'keeps the clone first for any other caller, even when the caller ships its own' {
-            Invoke-Locate 'BHoM/Revit_Toolkit' 'BHoM/BHoM_Engine' $true $true | Should -BeLike 'clone*'
+            (Invoke-Locate 'BHoM/Revit_Toolkit' 'BHoM/BHoM_Engine' $true $true).Found | Should -BeLike 'clone*'
         }
 
         It 'falls back to the clone when the engine repository has no workspace copy' {
-            Invoke-Locate 'BHoM/BHoM_Engine' 'BHoM/BHoM_Engine' $true $false | Should -BeLike 'clone*'
+            (Invoke-Locate 'BHoM/BHoM_Engine' 'BHoM/BHoM_Engine' $true $false).Found | Should -BeLike 'clone*'
+        }
+
+        # Without the exit, the step would go on to write an empty path= line.
+        It 'stops at its error exit when neither copy exists' {
+            $result = Invoke-Locate 'BHoM/BHoM_Engine' 'BHoM/BHoM_Engine' $false $false
+            ($result.Messages -join "`n") | Should -Match 'Verification\.sln not found'
+            $result.PathLines | Should -Be 0 -Because 'the step must exit before writing any path'
         }
     }
 }

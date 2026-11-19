@@ -30,6 +30,8 @@ inputs:
       BHoM_Engine repository (owner/repo). Must expose
       .ci/code/Verification.sln, which builds the serialisation test
       assemblies. Override to point at a fork.
+      The engine repository gets the workspace-first order only when this input matches the
+      calling repository.
     required: false
     default: 'BHoM/BHoM_Engine'
   test_toolkit_repo:
