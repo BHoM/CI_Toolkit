@@ -303,8 +303,9 @@ namespace SerialiserRunner.Tests
         }
     }
 
-    // Migration-parity suite for R1: proves Compare reproduces BHoMBot's count-aware
-    // InformationIsEqual / InformationIsLessAndBetter semantics (List, not Set).
+    // Migration-parity suite for R1: Compare matches failures by Description without counting
+    // repeats, and compares the total count separately (InformationIsEqual /
+    // InformationIsLessAndBetter).
     public class LegacyCountParityTests
     {
         private static SerialiserResult Errors(params string[] descs) => new()
