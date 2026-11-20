@@ -1,7 +1,7 @@
 # ci-serialisation-action.Tests.ps1 — structural assertions over ci-serialisation's action.yml.
 #
 # These test the shape of the workflow file rather than any script it calls. That is unusual
-# here, and deliberate: all three properties below are invariants a reader cannot check by
+# here, and deliberate: the three structural properties below are invariants a reader cannot check by
 # looking at one place in the file, and each of them was broken in a way that produced no
 # failure anywhere. A composite action with a dozen steps has emergent properties, and nothing
 # else in this repository asserts one.
@@ -10,6 +10,11 @@
 # nothing else, and adding a YAML module to reach three line-shaped facts would cost more than
 # it returns. Each assertion below is written so that a restructure fails it loudly rather than
 # passing vacuously.
+#
+# One Context, 'Verification.sln comes from the repository under test when that is the engine',
+# executes code instead: it extracts the Locate Verification.sln step's own script as text and
+# runs it in a separate PowerShell instance against temporary folders, because which solution the
+# step picks is behaviour rather than shape.
 #
 # Run locally:  pwsh -Command "Invoke-Pester .github/scripts/tests -Output Detailed"
 # Run in CI:    lint-workflows.yml, the powershell-tests job.
@@ -83,6 +88,62 @@ Describe 'ci-serialisation action.yml' {
         It 'leaves the assemblies reset to resolve-dependencies' {
             $resets = @($lines | Where-Object { $_ -match 'Remove-Item.*ProgramData\\BHoM\\Assemblies' })
             $resets | Should -BeNullOrEmpty -Because "resolve-dependencies resets this directory in its own Prepare folders step, so a reset here is redundant and reads as the between-legs separation when it is not:`n$($resets -join "`n")"
+        }
+    }
+
+    Context 'Verification.sln comes from the repository under test when that is the engine' {
+
+        # When BHoM_Engine is the caller its dependency clone may be on another branch (fork pull
+        # requests, push runs), so its own checkout must win; every other caller keeps the clone
+        # first. Runs the step's own script, extracted as text, in a separate PowerShell instance
+        # because the step can exit.
+        BeforeAll {
+            $script:savedGitHubOutput = $env:GITHUB_OUTPUT
+
+            $start = ($lines | Select-String -Pattern '^\s*- name:\s*Locate Verification\.sln\s*$' | Select-Object -First 1).LineNumber
+            $start | Should -Not -BeNullOrEmpty -Because 'the step this tests has been renamed or removed'
+            $runAt = $start
+            while ($lines[$runAt] -notmatch '^\s*run:\s*\|\s*$') { $runAt++ }
+            $indent = ($lines[$runAt + 1] -replace '^(\s*).*$', '$1').Length
+            $body = @()
+            for ($i = $runAt + 1; $i -lt $lines.Count; $i++) {
+                if ($lines[$i] -match '\S' -and ($lines[$i] -replace '^(\s*).*$', '$1').Length -lt $indent) { break }
+                $body += if ($lines[$i].Length -ge $indent) { $lines[$i].Substring($indent) } else { '' }
+            }
+            $script:locateScript = $body -join "`n"
+            $script:locateScript | Should -Match 'Verification\.sln' -Because 'if this finds nothing the extraction has drifted and the tests are vacuous'
+
+            function script:Invoke-Locate([string]$Repository, [string]$EngineRepo, [bool]$CloneHasSln, [bool]$WorkspaceHasSln) {
+                $root = Join-Path ([IO.Path]::GetTempPath()) ([Guid]::NewGuid().ToString('N'))
+                New-Item -ItemType Directory -Force $root | Out-Null
+                $workspace = Join-Path $root 'ws'; $deps = Join-Path $root 'deps'
+                if ($WorkspaceHasSln) { New-Item -ItemType Directory -Force (Join-Path $workspace '.ci\code') | Out-Null; Set-Content (Join-Path $workspace '.ci\code\Verification.sln') '' }
+                if ($CloneHasSln)     { New-Item -ItemType Directory -Force (Join-Path $deps 'BHoM_Engine\.ci\code') | Out-Null; Set-Content (Join-Path $deps 'BHoM_Engine\.ci\code\Verification.sln') '' }
+                $text = $script:locateScript.Replace('${{ inputs.serialisation_engine_repo }}', $EngineRepo).Replace('${{ github.workspace }}', $workspace).Replace('${{ github.repository }}', $Repository).Replace('C:\bhom-deps', $deps)
+                $outputPath = Join-Path $root 'output.txt'; Set-Content $outputPath ''
+                $env:GITHUB_OUTPUT = $outputPath
+                $ps = [powershell]::Create()
+                try {
+                    [void]$ps.AddScript($text); [void]$ps.Invoke()
+                } finally { $ps.Dispose() }
+                $pathLines = @(Get-Content $outputPath | Where-Object { $_ -like 'path=*' })
+                Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue
+                $found = if ($pathLines.Count) { ($pathLines[0] -replace '^path=', '').Replace($workspace, 'workspace').Replace($deps, 'clone') } else { $null }
+                [pscustomobject]@{ Found = $found }
+            }
+        }
+
+        AfterAll {
+            if ($null -eq $script:savedGitHubOutput) { Remove-Item Env:GITHUB_OUTPUT -ErrorAction SilentlyContinue }
+            else { $env:GITHUB_OUTPUT = $script:savedGitHubOutput }
+        }
+
+        It 'takes the workspace copy when the caller is the engine repository' {
+            (Invoke-Locate 'BHoM/BHoM_Engine' 'BHoM/BHoM_Engine' $true $true).Found | Should -BeLike 'workspace*'
+        }
+
+        It 'keeps the clone first for any other caller, even when the caller ships its own' {
+            (Invoke-Locate 'BHoM/Revit_Toolkit' 'BHoM/BHoM_Engine' $true $true).Found | Should -BeLike 'clone*'
         }
     }
 }

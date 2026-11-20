@@ -30,6 +30,8 @@ inputs:
       BHoM_Engine repository (owner/repo). Must expose
       .ci/code/Verification.sln, which builds the serialisation test
       assemblies. Override to point at a fork.
+      The engine repository gets the workspace-first order only when this input matches the
+      calling repository.
     required: false
     default: 'BHoM/BHoM_Engine'
   test_toolkit_repo:
@@ -128,16 +130,15 @@ runs:
       if: steps.changed.outputs.count != '0'
       shell: pwsh
       run: |
-        $engParts   = "${{ inputs.serialisation_engine_repo }}".Split('/', 2)
+        $engRepo  = "${{ inputs.serialisation_engine_repo }}"
+        $engParts = $engRepo.Split('/', 2)
         $engDepsDir = "C:\bhom-deps\$($engParts[1])"
-        # Resolve order: engDepsDir first, workspace as fallback. bhom-deps
-        # takes priority to avoid picking up an unrelated .ci/code/Verification.sln
-        # in the caller (e.g. Revit repos ship one for Revit-specific tests).
-        # The workspace path only matches when BHoM_Engine itself is the caller.
-        $candidates = @(
-          (Join-Path $engDepsDir ".ci\code\Verification.sln"),
-          (Join-Path "${{ github.workspace }}" ".ci\code\Verification.sln")
-        )
+        $workspaceSln = Join-Path "${{ github.workspace }}" ".ci\code\Verification.sln"
+        $depsSln      = Join-Path $engDepsDir ".ci\code\Verification.sln"
+        # Test the engine repository with its own Verify methods, not its dependency clone's.
+        # Other callers use the clone first, because some (e.g. Revit repos) ship an unrelated Verification.sln.
+        $candidates = if ("${{ github.repository }}" -ieq $engRepo) { @($workspaceSln, $depsSln) }
+                      else                                          { @($depsSln, $workspaceSln) }
         $found = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
         if (-not $found) {
           Write-Host "::error title=Serialisation::Verification.sln not found in $engDepsDir or workspace."
