@@ -43,9 +43,11 @@ public static class CompareCommand
               + "environment failure, not a defect in this pull request.",
                 IsBaselineUnusable: true);
 
-        // Legacy comparison is COUNT-aware (List semantics), keyed on each failing
-        // entry's Description. Reproduced verbatim from BHoMBot's two comparison
-        // rules, equality and strict improvement (see the two helpers below).
+        // Failures are matched by Description, without counting repeats, and the total count is
+        // checked separately: equal for no regression, strictly fewer for an improvement. So a
+        // branch that swaps one failure for another copy of a Description already failing,
+        // keeping the total, is not reported, and nor is one of two items with the same
+        // Description fixed while the other breaks. See the two helpers below.
         List<FailureInfo> main = baseline.Failures;
         List<FailureInfo> branchInfo = branch.Failures;
 
