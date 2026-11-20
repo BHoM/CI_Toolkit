@@ -158,12 +158,23 @@ runs:
       run: |
         $script = Join-Path $env:GITHUB_ACTION_PATH "scripts/Resolve-DependencyGraph.ps1"
 
-        & $script `
-          -DepsFile "${{ inputs.deps_file }}" `
-          -Mode "${{ inputs.mode }}" `
-          -Seeds "${{ inputs.seeds }}" `
-          -AdditionalSeeds "${{ inputs.additional_seeds }}" `
-          -CloneRoot "C:\bhom-deps"
+        # Without this the check's only annotation is "Process completed with exit code 1",
+        # and the reason is in the log alone.
+        try {
+          & $script `
+            -DepsFile "${{ inputs.deps_file }}" `
+            -Mode "${{ inputs.mode }}" `
+            -Seeds "${{ inputs.seeds }}" `
+            -AdditionalSeeds "${{ inputs.additional_seeds }}" `
+            -CloneRoot "C:\bhom-deps"
+        }
+        catch {
+          # Where it was thrown, so an unexpected error still points at its line.
+          Write-Host $_.ScriptStackTrace
+          $message = $_.Exception.Message -replace '%', '%25' -replace "`r", '%0D' -replace "`n", '%0A'
+          Write-Host "::error title=Dependencies::$message"
+          exit 1
+        }
 
     - name: Compute cache key from dependency SHAs
       id: shas
@@ -230,6 +241,12 @@ runs:
     - name: Build dependencies
       if: steps.shas.outputs.keypart != '' && steps.cache.outputs.cache-hit != 'true'
       shell: pwsh
+      env:
+        # Widens NuGet's own per-request retry, which gives up after a few seconds by default.
+        # Invoke-DotnetRestore.ps1 retries the whole restore on top of this.
+        # Same values as ci-build/action.yml ("Build (Release)"); keep them together.
+        NUGET_ENHANCED_MAX_NETWORK_TRY_COUNT: '10'
+        NUGET_ENHANCED_NETWORK_RETRY_DELAY_MILLISECONDS: '3000'
       run: |
         $script = Join-Path $env:GITHUB_ACTION_PATH "scripts/Build-Dependencies.ps1"
         & $script -Configuration "${{ inputs.configuration }}" -CloneRoot "C:\bhom-deps"
