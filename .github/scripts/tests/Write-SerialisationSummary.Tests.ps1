@@ -1,4 +1,4 @@
-# Write-SerialisationSummary.Tests.ps1 — Pester tests for the serialisation job-summary decision.
+# Write-SerialisationSummary.Tests.ps1: Pester tests for the serialisation job-summary decision.
 #
 # The decision is a pure function over the step outcomes a workflow expression yields, which is
 # why it was extracted: reaching these states for real needs a dependency closure, a build, a
@@ -146,5 +146,85 @@ Describe 'Get-SerialisationSummary' {
             $out = Get-SerialisationSummary -BranchRunConclusion 'success' -BranchStatus 'Pass' @coverage
             $out[0] | Should -Be '### Serialisation'
         }
+    }
+}
+
+Describe 'Get-BaselineFailureList' {
+
+    # Shown when the job passes because every branch failure is pre-existing, so a reader can see
+    # which items the base already failed without the run's artefacts, which expire.
+    It 'lists every base failure one per line, repeats included, with the count' {
+        $descriptions = @('BH.oM.A.Alpha', 'BH.oM.B.Beta<BH.oM.C.Gamma>', 'BH.oM.A.Alpha')
+        $out = Get-BaselineFailureList -CompareVerdict 'ok' -Descriptions $descriptions
+
+        $out[0] | Should -Be '<details><summary>Failing on the base branch (3), for comparison with the failures reported above</summary>'
+        @($out | Where-Object { $_ -eq 'BH.oM.A.Alpha' }).Count | Should -Be 2
+        @($out | Where-Object { $_ -eq 'BH.oM.B.Beta<BH.oM.C.Gamma>' }).Count | Should -Be 1
+        $fence = [array]::IndexOf($out, '```')
+        $out[($fence + 1)..($fence + 3)] | Should -Be $descriptions
+        $out[$fence + 4] | Should -Be '```'
+    }
+
+    It 'adds no list on any other verdict' {
+        foreach ($verdict in 'regression', 'baseline-unusable', '') {
+            Get-BaselineFailureList -CompareVerdict $verdict -Descriptions @('BH.oM.A.Alpha') |
+                Should -BeNullOrEmpty -Because "verdict '$verdict' is not a pre-existing pass"
+        }
+    }
+
+    It 'adds no empty block when there are no entries' {
+        Get-BaselineFailureList -CompareVerdict 'ok' -Descriptions @() | Should -BeNullOrEmpty
+    }
+
+    It 'returns lines, never a bare string' {
+        $out = Get-BaselineFailureList -CompareVerdict 'ok' -Descriptions @('BH.oM.A.Alpha')
+        ,$out | Should -BeOfType [System.Object[]] -Because 'the caller pipes this straight into Out-File'
+    }
+}
+
+Describe 'Get-BaselineFailureDescriptions' {
+
+    BeforeAll {
+        function script:Write-Result([string]$Name, [string[]]$Descriptions) {
+            $failures = @($Descriptions | ForEach-Object { @{ Description = $_; Message = 'm' } })
+            $path = Join-Path $TestDrive $Name
+            @{ Status = 'Error'; FailureCount = $failures.Count; Failures = $failures } |
+                ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $path -Encoding utf8
+            $path
+        }
+    }
+
+    It 'returns nothing for a result with no failures' {
+        $out = Get-BaselineFailureDescriptions -Path (Write-Result 'none.json' @())
+        $out.Count | Should -Be 0
+    }
+
+    It 'keeps a single entry as a one-item list' {
+        $out = Get-BaselineFailureDescriptions -Path (Write-Result 'one.json' @('BH.oM.A.Alpha'))
+        ,$out | Should -BeOfType [System.Object[]]
+        $out.Count | Should -Be 1
+        $out[0] | Should -Be 'BH.oM.A.Alpha'
+    }
+
+    It 'returns every entry in order, repeats included' {
+        $descriptions = @('BH.oM.A.Alpha', 'BH.oM.B.Beta', 'BH.oM.A.Alpha')
+        $out = Get-BaselineFailureDescriptions -Path (Write-Result 'many.json' $descriptions)
+        $out | Should -Be $descriptions
+    }
+
+    It 'warns and returns nothing when the file is missing' {
+        Mock Write-Host {}
+        $out = Get-BaselineFailureDescriptions -Path (Join-Path $TestDrive 'absent.json')
+        $out.Count | Should -Be 0
+        Should -Invoke Write-Host -Times 1 -Exactly -ParameterFilter { $Object -match '^::warning title=Serialisation::' }
+    }
+
+    It 'warns and returns nothing when the file is not valid JSON' {
+        Mock Write-Host {}
+        $path = Join-Path $TestDrive 'bad.json'
+        Set-Content -LiteralPath $path -Value '{ not json' -Encoding utf8
+        $out = Get-BaselineFailureDescriptions -Path $path
+        $out.Count | Should -Be 0
+        Should -Invoke Write-Host -Times 1 -Exactly -ParameterFilter { $Object -match '^::warning title=Serialisation::' }
     }
 }

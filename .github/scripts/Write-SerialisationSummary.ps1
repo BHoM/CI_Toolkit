@@ -1,8 +1,8 @@
-# Write-SerialisationSummary.ps1 — the serialisation check's job-summary decision, on its
+# Write-SerialisationSummary.ps1: the serialisation check's job-summary decision, on its
 # own so it can be tested without running a serialisation check.
 #
 # Dot-sourced by .github/actions/ci-serialisation/action.yml and by
-# .github/scripts/tests/Write-SerialisationSummary.Tests.ps1. Defines a function and does
+# .github/scripts/tests/Write-SerialisationSummary.Tests.ps1. Defines functions and does
 # nothing else, so dot-sourcing has no side effects.
 
 function Get-SerialisationSummary {
@@ -97,7 +97,7 @@ function Get-SerialisationSummary {
             # state someone thought of; this describes the rest. It names the phase rather than
             # the step, because deriving the phase needs only the signals already passed in,
             # whereas naming the step would mean giving every step an id and threading each
-            # conclusion through — which is the enumeration that failed in the first place.
+            # conclusion through, which is the enumeration that failed in the first place.
             $phase =
                 if ($BranchRunConclusion -eq '' -or $BranchRunConclusion -eq 'skipped') {
                     "while preparing the branch leg, before serialisation ran"
@@ -129,5 +129,67 @@ function Get-SerialisationSummary {
         $lines += ""
     }
 
+    return $lines
+}
+
+function Get-BaselineFailureDescriptions {
+    <#
+    .SYNOPSIS
+      Reads the Description of every failing entry from a runner result file, repeats kept.
+
+    .DESCRIPTION
+      Used for the summary only, so a file that cannot be read gives a warning and an empty
+      list rather than an error: a passing job must not turn red over its summary.
+    #>
+    [CmdletBinding()]
+    param([string]$Path)
+
+    try {
+        $result = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        return ,@($result.Failures | ForEach-Object { $_.Description })
+    }
+    catch {
+        Write-Host "::warning title=Serialisation::Could not read $Path for the summary: $($_.Exception.Message)"
+        return ,@()
+    }
+}
+
+function Get-BaselineFailureList {
+    <#
+    .SYNOPSIS
+      The base branch's failing entries as summary lines, when the job passed because every
+      branch failure is pre-existing.
+
+    .DESCRIPTION
+      Without this the summary says the failures are pre-existing but not which they are, and
+      the result file that names them expires with the run's artefacts. One line per entry,
+      repeats kept, so the count matches the base run's. A fenced block, because descriptions
+      hold characters Markdown would otherwise interpret, such as generic type arguments.
+
+      Returned separately from Get-SerialisationSummary so the caller appends it after the
+      verdict, and an error while building the list cannot take the verdict with it.
+    #>
+    [CmdletBinding()]
+    param(
+        [string]$CompareVerdict = '',
+        [string[]]$Descriptions = @()
+    )
+
+    if ($CompareVerdict -ne 'ok' -or $Descriptions.Count -eq 0) {
+        return @()
+    }
+
+    $lines = @(
+        "<details><summary>Failing on the base branch ($($Descriptions.Count)), for comparison with the failures reported above</summary>"
+        ""
+        '```'
+    )
+    $lines += $Descriptions
+    $lines += @(
+        '```'
+        ""
+        "</details>"
+        ""
+    )
     return $lines
 }
