@@ -75,6 +75,8 @@ runs:
         $root = ".ci/unit-tests"
         if (-not (Test-Path $root)) {
           Write-Host "::warning title=UnitTests::No .ci/unit-tests directory. Unit test step skipped."
+          "This repository has no unit tests (.ci/unit-tests does not exist), so nothing ran." |
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY
           "found=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           exit 0
         }
