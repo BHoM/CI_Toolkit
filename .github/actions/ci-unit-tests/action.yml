@@ -195,7 +195,6 @@ runs:
         path: |
           TestResults/*.trx
           TestResults/*.html
-          TestResults/*.excluded.txt
         retention-days: 7
 
     # ReportGenerator merges the per-project reports and keeps only files in

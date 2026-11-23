@@ -5,9 +5,9 @@
 # .github/scripts/tests/Invoke-UnitTestProjects.Tests.ps1. Defines functions and sets the
 # strictness below, nothing else, so dot-sourcing runs nothing.
 #
-# The decisions live in pure functions (Read-TestListing, Get-ExcludedListingSources,
-# Read-TrxResult, Get-ProjectVerdict, Get-RunReport) so they can be tested against recorded
-# outputs. Invoke-UnitTestProjects is the only function that runs dotnet or writes anything.
+# The decisions live in pure functions (Read-TestListing, Read-TrxResult, Get-ProjectVerdict,
+# Get-RunReport) so they can be tested against recorded outputs. Invoke-UnitTestProjects is the
+# only function that runs dotnet or writes anything.
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -69,25 +69,6 @@ function Read-TestListing {
     $discovered = $listing.Count
     $read = $ExitCode -eq 0 -and -not $brokenHost -and ($discovered -gt 0 -or $zeroStated)
     [pscustomobject]@{ Read = $read; Discovered = $discovered }
-}
-
-function Get-ExcludedListingSources {
-    <#
-    .SYNOPSIS
-      The test assemblies named in `dotnet test --list-tests` output, one per target framework.
-
-    .DESCRIPTION
-      The excluded tests never reach the results files, so vstest lists them by category from
-      these assemblies. Each one is written to the same file, so a multi-targeted project keeps
-      only the last framework's listing.
-
-    .OUTPUTS
-      [string[]] assembly paths, in the order printed.
-    #>
-    [CmdletBinding()]
-    param([Parameter(Mandatory)][AllowEmptyString()][string]$Output)
-
-    @([regex]::Matches($Output, '(?m)^Test run for (.+?\.dll) \(') | ForEach-Object { $_.Groups[1].Value })
 }
 
 function Read-TrxResult {
@@ -368,13 +349,6 @@ function Invoke-UnitTestProjects {
         if (-not $listing.Read -or $listing.Discovered -eq 0) {
             $verdicts += Get-ProjectVerdict -Name $name -BuildExitCode 0 -Listing $listing
             continue
-        }
-
-        New-Item -ItemType Directory -Force -Path $ResultsDirectory | Out-Null
-        foreach ($dll in (Get-ExcludedListingSources -Output $listOut)) {
-            dotnet vstest $dll /ListFullyQualifiedTests `
-                "/ListTestsTargetPath:$(Join-Path $PWD "$ResultsDirectory/$name.excluded.txt")" `
-                "/TestCaseFilter:TestCategory=$Category" | Out-Null
         }
 
         Write-Host "::group::dotnet test $name --filter $filter"
