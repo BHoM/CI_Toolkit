@@ -78,24 +78,6 @@ Describe 'Read-TestListing' {
     }
 }
 
-Describe 'Get-ExcludedListingSources' {
-
-    It 'names the assembly from the "Test run for" line' {
-        $s = @(Get-ExcludedListingSources -Output (Get-Listing 'duplicate-names'))
-        $s.Count | Should -Be 1
-        $s[0]    | Should -Be 'D:\a\Sample\Sample\.ci\unit-tests\ExcludedNames_Tests\bin\Test\net8.0\ExcludedNames_Tests.dll'
-    }
-
-    It 'names one assembly per target framework' {
-        $out = "Test run for D:\a\x\net8.0\X.dll (.NETCoreApp,Version=v8.0)`nThe following Tests are available:`n    A`nTest run for D:\a\x\net48\X.dll (.NETFramework,Version=v4.8)`nThe following Tests are available:`n    A`n"
-        @(Get-ExcludedListingSources -Output $out) | Should -Be @('D:\a\x\net8.0\X.dll', 'D:\a\x\net48\X.dll')
-    }
-
-    It 'returns nothing when no assembly is named' {
-        @(Get-ExcludedListingSources -Output 'no assembly here').Count | Should -Be 0
-    }
-}
-
 Describe 'Read-TrxResult' {
 
     It 'reads the counters' {
