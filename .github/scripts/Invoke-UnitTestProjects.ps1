@@ -319,10 +319,10 @@ function Invoke-UnitTestProjects {
       Runs every test project and reports on it. The only function here with side effects.
 
     .DESCRIPTION
-      Per-project invocation, not `dotnet test <sln>`. BHoM `_Tests.sln` files map every
-      project's `Test|Any CPU` to `Debug|Any CPU`, so a solution-level build silently compiles
-      Debug and the test host (which only has an executable TFM under Test) is never produced.
-      Iterating `.csproj` files honours `--configuration Test` correctly.
+      Per-project invocation, not `dotnet test <sln>`. A `_Tests.sln` may map a project's
+      `Test|Any CPU` to `Debug|Any CPU`, and a project that sets its executable target framework
+      only under `Test` then produces no test host. Building each `.csproj` with `-c Test` does
+      not depend on how the solution maps it.
 
       dotnet's own output is sent to the host, not returned, so the log reads as it did when
       this ran inline and the function returns only the exit code.

@@ -64,10 +64,7 @@ runs:
 
     # Convention: tests live somewhere under .ci/unit-tests. The directory is
     # the contract; its internal layout is not. Projects are selected by being
-    # test projects, not by filename and not through a .sln, because neither
-    # holds across the fleet: three repos name the project `*_Test.csproj`
-    # (singular), two keep the solution a directory deeper, and two have no
-    # solution at all.
+    # test projects, not by filename and not through a .sln.
     - name: Discover test projects
       id: test_check
       if: steps.changed.outputs.count != '0'
@@ -164,11 +161,9 @@ runs:
       if: steps.test_check.outputs.found == 'true'
       shell: pwsh
       env:
-        # Tests target net6.0[-windows] but windows-2025 runners ship only
-        # .NET 8/9/10. Roll forward is mandatory, otherwise the test host
-        # fails to start. `Major` resolves to the lowest available higher
-        # major (currently .NET 8) for deterministic behaviour across image
-        # refreshes; `LatestMajor` would track the newest installed runtime.
+        # Tests target net6.0[-windows], which the runner image does not
+        # carry. Roll forward is mandatory, otherwise the test host fails to
+        # start. `Major` resolves to the lowest available higher major.
         DOTNET_ROLL_FORWARD: Major
         # The test count is read out of `--list-tests` prose, and VSTest
         # localises that prose to the machine's UI language. Pin it so the
